@@ -1,0 +1,13 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "@types/tampermonkey": "^5.0.4",
+      },
+    },
+  },
+  "packages": {
+    "@types/tampermonkey": ["@types/tampermonkey@5.0.4", "", {}, "sha512-HEJ0O5CkDZSwIgd9Zip4xM8o7gZC8zBmJuH1YEXNINIC+aCWEXD10pnpo3NQG5IWHx+Xr4fMSGq1jqeKXH2lpA=="],
+  }
+}
