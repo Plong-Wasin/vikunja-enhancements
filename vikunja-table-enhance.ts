@@ -1,7 +1,80 @@
+interface Task {
+    id: number;
+    title: string;
+    description: string;
+    done: boolean;
+    done_at: string;
+    due_date: string;
+    reminders: null;
+    project_id: number;
+    repeat_after: number;
+    repeat_mode: number;
+    priority: number;
+    start_date: string;
+    end_date: string;
+    assignees: null;
+    labels: Label[] | null;
+    hex_color: string;
+    percent_done: number;
+    identifier: string;
+    index: number;
+    related_tasks: RelatedTasks;
+    attachments: Attachment[] | null;
+    cover_image_attachment_id: number;
+    is_favorite: boolean;
+    created: string;
+    updated: string;
+    bucket_id: number;
+    position: number;
+    reactions: null;
+    created_by: CreatedBy;
+}
+
+interface Attachment {
+    id: number;
+    task_id: number;
+    created_by: CreatedBy;
+    file: IFile;
+    created: string;
+}
+
+interface CreatedBy {
+    id: number;
+    name: string;
+    username: string;
+    created: string;
+    updated: string;
+}
+
+interface IFile {
+    id: number;
+    name: string;
+    mime: string;
+    size: number;
+    created: string;
+}
+
+interface Label {
+    id: number;
+    title: string;
+    description: string;
+    hex_color: string;
+    created_by: CreatedBy;
+    created: string;
+    updated: string;
+}
+
+interface RelatedTasks {
+    subtask?: Task[];
+    parenttask?: Task[];
+}
+
 (function () {
-    const NO = 0; // สำหรับ "#" หรือไม่ระบุ
-    const DONE = 1; // "Done" /
-    const TITLE = 2; // "Title" /
+    'use strict';
+
+    const IDENTIFY = 0; // สำหรับ "#" หรือไม่ระบุ
+    const DONE = 1; // "Done"
+    const TITLE = 2; // "Title"
     const PRIORITY = 3; // "Priority" /
     const LABELS = 4; // "Labels" /
     const ASSIGNEES = 5; // "Assignees" /
@@ -18,6 +91,13 @@
     function getViewId(): number {
         return +(window.location.pathname.split('/').pop() ?? 0);
     }
+
+    function getProjectId(): number {
+        const pathParts = window.location.pathname.split('/');
+        const projectId = pathParts[2];
+        return +projectId;
+    }
+
     function getJwtToken() {
         return localStorage.getItem('token');
     }
@@ -60,6 +140,40 @@
     }
 
     /**
+     * Extract the task ID from a table row element.
+     * @param tr - The table row containing the task link.
+     * @returns The task ID as a number, or 0 if not found.
+     */
+    function getTaskIdByTr(tr: HTMLTableRowElement | null): number {
+        if (!tr) return 0;
+
+        const link = tr.querySelector<HTMLAnchorElement>('a');
+        if (!link) return 0;
+
+        const idStr = link.href.split('/').pop();
+        return idStr ? Number(idStr) : 0;
+    }
+
+    /**
+     * Extract the task ID from any element inside the row.
+     * @param el - An element inside the table row.
+     * @returns The task ID as a number, or 0 if not found.
+     */
+    function getTaskIdFromElement(el: HTMLElement): number {
+        if (el instanceof HTMLTableRowElement) return getTaskIdByTr(el);
+        const tr = el.closest('tr');
+        return getTaskIdByTr(tr);
+    }
+
+    function getDoneText(): string {
+        return (
+            document.querySelectorAll<HTMLSpanElement>(
+                '.columns-filter span'
+            )[2]?.textContent ?? ''
+        );
+    }
+
+    /**
      * Returns the position of a checked column, or -1 if not checked.
      *
      * @param column - The column index to check.
@@ -70,127 +184,657 @@
     }
 
     /**
-     * Main function to enhance editable titles in the table.
+     * Entry point: Enhance editable titles in the table.
      */
     function enhanceEditableTitles() {
-        const titleIndex = getCheckedColumnIndex(2);
+        const titleIndex = getCheckedColumnIndex(TITLE);
         if (titleIndex === -1) return;
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${titleIndex + 1})`
         );
 
-        cells.forEach(makeCellEditable);
+        cells.forEach(initEditableCell);
     }
 
     /**
-     * Apply editable behavior to a single table cell.
+     * Initialize editable behavior for a single table cell.
      * @param td - The table cell element.
      */
-    function makeCellEditable(td: HTMLTableCellElement) {
-        td.style.cssText =
-            'display: flex; justify-content: space-between; align-items: center;';
-
+    function initEditableCell(td: HTMLTableCellElement) {
         const link = td.querySelector<HTMLAnchorElement>('a');
         if (!link) return;
 
-        let originalText = link.textContent || '';
+        const div = document.createElement('div');
+        td.appendChild(div);
+        styleCell(div);
 
-        const editBtn = createEditButton(link, originalText);
-        td.appendChild(editBtn);
+        div.appendChild(link);
 
-        attachLinkEvents(
-            link,
-            () => originalText,
-            (newText) => (originalText = newText)
-        );
+        const span = createEditableSpan();
+        div.appendChild(span);
+
+        const editBtn = createEditButton(link, span);
+        div.appendChild(editBtn);
+
+        div.addEventListener('dblclick', () => activateEditMode(link, span));
+
+        attachLinkEvents(link, span);
+    }
+
+    /**
+     * Apply layout styling to the table cell.
+     */
+    function styleCell(td: HTMLElement) {
+        td.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    `;
+    }
+
+    /**
+     * Create an editable span (hidden by default).
+     */
+    function createEditableSpan(): HTMLSpanElement {
+        const span = document.createElement('span');
+        span.contentEditable = 'true';
+        span.classList.add('d-none');
+        span.classList.add('editable-span');
+        return span;
     }
 
     /**
      * Create the edit button for a link.
      * @param link - The anchor element to edit.
-     * @param originalText - Original text of the link.
-     * @returns The button element.
+     * @param span - The editable span element.
      */
-    function createEditButton(link: HTMLAnchorElement, originalText: string) {
+    function createEditButton(link: HTMLAnchorElement, span: HTMLSpanElement) {
         const btn = document.createElement('button');
         btn.innerHTML = '✎';
-        btn.className = 'editTitle';
-        btn.style.cssText =
-            'color: rgb(235, 233, 229); border: none; background: transparent; cursor: pointer;';
-
-        btn.addEventListener('click', () => makeLinkEditable(link));
+        btn.className = 'edit-title';
+        btn.addEventListener('click', () => activateEditMode(link, span));
         return btn;
     }
 
     /**
-     * Make a link editable and focus at the end.
-     * @param link - The anchor element to edit.
+     * Switch link into editable mode.
      */
-    function makeLinkEditable(link: HTMLAnchorElement) {
-        link.contentEditable = 'true';
-        link.focus();
+    function activateEditMode(link: HTMLAnchorElement, span: HTMLSpanElement) {
+        span.textContent = link.textContent || '';
+        link.classList.add('d-none');
+        span.classList.remove('d-none');
+        focusCursorToEnd(span);
+    }
 
+    /**
+     * Place cursor at the end of a contenteditable element.
+     */
+    function focusCursorToEnd(element: HTMLElement) {
         const range = document.createRange();
-        range.selectNodeContents(link);
-        range.collapse(false); // move cursor to end
+        range.selectNodeContents(element);
+        range.collapse(false);
 
-        const sel = window.getSelection();
-        if (sel) {
-            sel.removeAllRanges();
-            sel.addRange(range);
+        const selection = window.getSelection();
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+
+        element.focus();
+    }
+
+    /**
+     * Attach events for saving or canceling edits.
+     */
+    function attachLinkEvents(link: HTMLAnchorElement, span: HTMLSpanElement) {
+        span.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                span.blur();
+                saveChanges(link, span);
+            } else if (e.key === 'Escape') {
+                cancelEdit(link, span);
+            }
+        });
+
+        span.addEventListener('blur', () => saveChanges(link, span));
+    }
+
+    function colorIsDark(color: string | undefined) {
+        if (typeof color === 'undefined') {
+            return true; // Defaults to dark
+        }
+
+        if (color === '#' || color === '') {
+            return true; // Defaults to dark
+        }
+
+        if (color.substring(0, 1) !== '#') {
+            color = '#' + color;
+        }
+
+        const rgb = parseInt(color.substring(1, 7), 16); // convert rrggbb to decimal
+        const r = (rgb >> 16) & 0xff; // extract red
+        const g = (rgb >> 8) & 0xff; // extract green
+        const b = (rgb >> 0) & 0xff; // extract blue
+
+        // this is a quick and dirty implementation of the WCAG 3.0 APCA color contrast formula
+        // see: https://gist.github.com/Myndex/e1025706436736166561d339fd667493#andys-shortcut-to-luminance--lightness
+        const Ys =
+            Math.pow(r / 255.0, 2.2) * 0.2126 +
+            Math.pow(g / 255.0, 2.2) * 0.7152 +
+            Math.pow(b / 255.0, 2.2) * 0.0722;
+
+        return Math.pow(Ys, 0.678) >= 0.5;
+    }
+
+    /**
+     * Save changes (send API request if text is modified).
+     */
+    function saveChanges(link: HTMLAnchorElement, span: HTMLSpanElement) {
+        const newText = span.textContent?.trim() || '';
+        const originalText = link.textContent || '';
+
+        if (!newText || newText === originalText) {
+            resetView(link, span, originalText);
+            return;
+        }
+
+        const taskId = link.href.split('/').pop();
+        if (taskId) {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/${taskId}`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({ title: newText })
+            });
+        }
+
+        resetView(link, span, newText);
+    }
+
+    /**
+     * Cancel editing and restore the original view.
+     */
+    function cancelEdit(link: HTMLAnchorElement, span: HTMLSpanElement) {
+        resetView(link, span, link.textContent || '');
+    }
+
+    /**
+     * Restore link and hide editable span.
+     */
+    function resetView(
+        link: HTMLAnchorElement,
+        span: HTMLSpanElement,
+        text: string
+    ) {
+        link.textContent = text;
+        link.classList.remove('d-none');
+        span.classList.add('d-none');
+    }
+
+    /**
+     * Enhance the "Done" column with checkboxes.
+     */
+    function enhanceDoneColumn() {
+        const doneIndex = getCheckedColumnIndex(DONE);
+        if (doneIndex === -1) return;
+
+        const cells = document.querySelectorAll<HTMLTableCellElement>(
+            `table td:nth-child(${doneIndex + 1})`
+        );
+
+        cells.forEach(setupDoneCell);
+    }
+
+    /**
+     * Setup a single "Done" cell with checkbox + label.
+     */
+    function setupDoneCell(cell: HTMLTableCellElement) {
+        const hasDoneElement = Boolean(
+            cell.querySelector<HTMLDivElement>('.is-done--small')
+        );
+
+        cell.innerHTML = buildDoneCellHTML(hasDoneElement);
+
+        const doneElement =
+            cell.querySelector<HTMLDivElement>('.is-done--small');
+        const inputElement = cell.querySelector<HTMLInputElement>('input');
+
+        if (!doneElement || !inputElement) return;
+
+        syncDoneState(doneElement, inputElement.checked);
+        bindDoneEvents(inputElement, cell.closest('tr')!);
+    }
+
+    /**
+     * Build HTML for a "Done" cell.
+     */
+    function buildDoneCellHTML(isChecked: boolean): string {
+        const doneLabel = `
+        <div data-v-85863e0a="" data-v-dd8cbb24="" 
+             class="is-done is-done--small" 
+             style="flex: 1; width: 100%;">Done</div>
+    `;
+
+        return `
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" ${isChecked ? 'checked' : ''}/>
+            ${doneLabel}
+        </div>
+    `;
+    }
+
+    /**
+     * Attach change event to a checkbox and handle single or bulk updates.
+     */
+    function bindDoneEvents(input: HTMLInputElement, tr: HTMLTableRowElement) {
+        input.addEventListener('change', () => {
+            const isChecked = input.checked;
+            const tbody = tr.closest('tbody');
+            if (!tbody) return;
+
+            if (tr.classList.contains('bulk-selected')) {
+                updateBulkRowsDone(tbody, isChecked);
+            } else {
+                updateSingleRowDone(tr, isChecked);
+            }
+        });
+    }
+
+    /**
+     * Update a single row checkbox and send API request.
+     */
+    function updateSingleRowDone(tr: HTMLTableRowElement, isChecked: boolean) {
+        const doneElement = tr.querySelector<HTMLDivElement>('.is-done--small');
+        if (!doneElement) return;
+
+        syncDoneState(doneElement, isChecked);
+
+        const taskId = getTaskIdByTr(tr);
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/${taskId}`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({ done: isChecked })
+        });
+    }
+
+    /**
+     * Update all rows with the 'bulk-selected' class to match checkbox state.
+     */
+    function updateBulkRowsDone(
+        tbody: HTMLTableSectionElement,
+        isChecked: boolean
+    ) {
+        const bulkRows = Array.from(
+            tbody.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected')
+        );
+
+        // Send bulk API request
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/bulk`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                done: isChecked,
+                task_ids: bulkRows.map(getTaskIdByTr)
+            })
+        });
+
+        // Update UI for all bulk rows
+        bulkRows.forEach((row) => {
+            const rowInput = row.querySelector<HTMLInputElement>(
+                'input[type="checkbox"]'
+            );
+            const rowDone =
+                row.querySelector<HTMLDivElement>('.is-done--small');
+            if (rowInput && rowDone) {
+                rowInput.checked = isChecked;
+                syncDoneState(rowDone, isChecked);
+            }
+        });
+    }
+
+    /**
+     * Show or hide the "Done" label based on checkbox state.
+     */
+    function syncDoneState(doneElement: HTMLDivElement, isChecked: boolean) {
+        doneElement.classList.toggle('d-none', !isChecked);
+    }
+
+    /**
+     * Retrieve all task IDs from the table rows.
+     */
+    function getAllTaskIds(): number[] {
+        const taskLinks =
+            document.querySelectorAll<HTMLAnchorElement>('tbody tr a');
+        return Array.from(taskLinks).map((link) => getTaskIdFromElement(link));
+    }
+
+    /**
+     * Fetch tasks data from API given an array of task IDs.
+     */
+    function fetchTasksByIds(
+        taskIds: number[]
+    ): Promise<Tampermonkey.Response<any>> {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url:
+                    '/api/v1/tasks/all?filter=' +
+                    encodeURIComponent('id in ' + taskIds.join(',')),
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                onload: (response) => resolve(response),
+                onerror: (error) => reject(error)
+            });
+        });
+    }
+
+    /**
+     * Enhance the "Priority" column by replacing cells with dropdown selectors.
+     */
+    async function enhancePriorityColumn() {
+        const priorityIndex = getCheckedColumnIndex(PRIORITY);
+        if (priorityIndex === -1) return;
+
+        const response = await fetchTasksByIds(getAllTaskIds());
+        const taskData: Task[] = JSON.parse(response.responseText);
+
+        const tbody = document.querySelector('tbody');
+        if (!tbody) return;
+
+        const rows = document.querySelectorAll<HTMLTableRowElement>('tbody tr');
+        rows.forEach((row) => setupPriorityCell(row, taskData, priorityIndex));
+    }
+
+    /**
+     * Setup priority cell for a single row.
+     */
+    function setupPriorityCell(
+        row: HTMLTableRowElement,
+        taskData: Task[],
+        priorityIndex: number
+    ) {
+        const taskId = getTaskIdByTr(row);
+        const td = row.children[priorityIndex];
+
+        const wrapper = document.createElement('div');
+        wrapper.classList.add('select');
+
+        const select = createPrioritySelect();
+        const currentPriority =
+            taskData.find((task) => task.id === taskId)?.priority ?? 0;
+        updateSelectStyle(select, currentPriority);
+
+        wrapper.appendChild(select);
+        td.innerHTML = '';
+        td.appendChild(wrapper);
+
+        bindPriorityEvents(select, row);
+    }
+
+    /**
+     * Create a <select> element for priority options.
+     */
+    function createPrioritySelect(): HTMLSelectElement {
+        const select = document.createElement('select');
+        select.classList.add('priority-select');
+        select.innerHTML = `
+        <option value="0" style="color: var(--info);">Unset</option>
+        <option value="1" style="color: var(--info);">Low</option>
+        <option value="2" style="color: var(--warning);">Medium</option>
+        <option value="3" style="color: var(--danger);">High</option>
+        <option value="4" style="color: var(--danger);">Urgent</option>
+        <option value="5" style="color: var(--danger);">DO NOW</option>
+    `;
+        return select;
+    }
+
+    /**
+     * Update the <select> element value and style based on priority.
+     */
+    function updateSelectStyle(select: HTMLSelectElement, priority: number) {
+        select.value = priority.toString();
+        if (select.selectedOptions[0]) {
+            select.style.color = select.selectedOptions[0].style.color;
         }
     }
 
     /**
-     * Attach events to handle saving/canceling editable link.
-     * @param link - The anchor element.
-     * @param getOriginalText - Function returning original text.
-     * @param setOriginalText - Function to update original text.
+     * Bind event handlers for priority change (single vs bulk update).
      */
-    function attachLinkEvents(
-        link: HTMLAnchorElement,
-        getOriginalText: () => string,
-        setOriginalText: (newText: string) => void
+    function bindPriorityEvents(
+        select: HTMLSelectElement,
+        row: HTMLTableRowElement
     ) {
-        const saveLink = () => {
-            link.contentEditable = 'false';
+        select.addEventListener('change', () => {
+            const tbody = row.closest('tbody');
+            if (!tbody) return;
 
-            const text = link.textContent?.trim() || '';
-            if (!text) {
-                link.textContent = getOriginalText();
+            const priority = +select.value;
+            if (row.classList.contains('bulk-selected')) {
+                updateBulkRowsPriority(tbody, priority);
             } else {
-                setOriginalText(text);
-                const taskId = link.href.split('/').pop();
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: `/api/v1/tasks/${taskId}`,
-                    headers: {
-                        Authorization: `Bearer ${getJwtToken()}`,
-                        'Content-Type': 'application/json'
-                    },
-                    data: JSON.stringify({ title: text })
-                });
+                updateSingleRowPriority(row, priority);
             }
-        };
-
-        link.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                link.blur();
-                saveLink();
-            } else if (e.key === 'Escape') {
-                link.textContent = getOriginalText();
-                link.contentEditable = 'false';
-                link.blur();
-            }
-        });
-
-        link.addEventListener('blur', () => {
-            if (link.isContentEditable) saveLink();
+            updateSelectStyle(select, priority);
         });
     }
+
+    /**
+     * Update a single row's priority via API.
+     */
+    function updateSingleRowPriority(
+        row: HTMLTableRowElement,
+        priority: number
+    ) {
+        const taskId = getTaskIdByTr(row);
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/${taskId}`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({ priority })
+        });
+    }
+
+    /**
+     * Update all bulk-selected rows' priority via API + update UI.
+     */
+    function updateBulkRowsPriority(
+        tbody: HTMLTableSectionElement,
+        priority: number
+    ) {
+        const bulkRows = Array.from(
+            tbody.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected')
+        );
+
+        // Send bulk API request
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/bulk`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                priority,
+                task_ids: bulkRows.map(getTaskIdByTr)
+            })
+        });
+
+        // Update UI for all bulk rows
+        bulkRows.forEach((row) => {
+            const select =
+                row.querySelector<HTMLSelectElement>('.priority-select');
+            if (select) updateSelectStyle(select, priority);
+        });
+    }
+
+    GM_addStyle(`
+        .edit-title {
+            border: none;
+            background: transparent;
+            color: transparent;
+            transform: rotate(90deg);
+        }
+        tbody tr:hover .editable-span.d-none + .edit-title {
+            display: inline-block;
+            color: rgba(235, 233, 229, 0.9);
+            cursor: pointer;
+        }
+        .bulk-selected {
+            background-color: var(--table-row-hover-background-color)
+        }
+        tbody tr.drag-over {
+            outline: 2px dashed #007bff;
+        }
+        tbody td:hover {
+            background: var(--pre-background);
+        }
+        .d-none {
+            display: none;
+        }
+    `);
+    let lastClickedIndex: number | null = null;
+    let draggedRows: HTMLTableRowElement[] = [];
+    let lastDragOverTr: HTMLTableRowElement | null = null;
+
+    document.addEventListener('click', (e) => {
+        const tr = (e.target as HTMLElement).closest('tr');
+        const tbody = tr?.closest('tbody');
+
+        if (!tr || !tbody) {
+            return;
+        }
+
+        const rows = Array.from(tbody.querySelectorAll('tbody tr'));
+        const clickedIndex = rows.indexOf(tr);
+
+        if (
+            e.target instanceof HTMLInputElement ||
+            e.target instanceof HTMLSelectElement
+        ) {
+            return;
+        }
+
+        if (e.shiftKey && lastClickedIndex !== null) {
+            rows.forEach((r) => r.classList.remove('bulk-selected'));
+            const [start, end] = [lastClickedIndex, clickedIndex].sort(
+                (a, b) => a - b
+            );
+            for (let i = start; i <= end; i++)
+                rows[i].classList.add('bulk-selected');
+        } else if (e.ctrlKey || e.metaKey) {
+            tr.classList.toggle('bulk-selected');
+        } else {
+            rows.forEach((r) => r.classList.remove('bulk-selected'));
+            tr.classList.add('bulk-selected');
+        }
+
+        lastClickedIndex = clickedIndex;
+        e.preventDefault();
+    });
+
+    // --- Drag & Drop ---
+    document.addEventListener('dragstart', (e: DragEvent) => {
+        const tr = (e.target as HTMLElement).closest(
+            'tr'
+        ) as HTMLTableRowElement;
+        const tbody = tr?.closest('tbody');
+        if (!tr || !tbody || !tr.classList.contains('bulk-selected')) {
+            e.preventDefault();
+            return;
+        }
+
+        draggedRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
+        e.dataTransfer!.effectAllowed = 'move';
+        e.dataTransfer!.setData('text/plain', 'dragging');
+    });
+
+    document.addEventListener('dragover', (e) => {
+        const tr = (e.target as HTMLElement).closest('tr');
+        if (
+            !tr ||
+            !tr.closest('tbody') ||
+            tr.classList.contains('bulk-selected')
+        )
+            return;
+
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = 'move';
+
+        if (lastDragOverTr && lastDragOverTr !== tr) {
+            lastDragOverTr.classList.remove('drag-over');
+        }
+
+        tr.classList.add('drag-over');
+        lastDragOverTr = tr;
+    });
+
+    document.addEventListener('dragend', (e) => {
+        if (lastDragOverTr) {
+            lastDragOverTr.classList.remove('drag-over');
+            lastDragOverTr = null;
+        }
+    });
+
+    document.addEventListener('dragleave', (e) => {
+        const tr = (e.target as HTMLElement).closest('tr');
+        if (tr && tr.classList.contains('drag-over')) {
+            tr.classList.remove('drag-over');
+            lastDragOverTr = null;
+        }
+    });
+
+    document.addEventListener('drop', (e) => {
+        const targetTr = (e.target as HTMLElement).closest('tr');
+        const tbody = targetTr?.closest('tbody');
+        if (!targetTr || !tbody) return;
+        e.preventDefault();
+
+        // ถ้า targetTr อยู่ใน selection bulk-selected ของตัวเอง → ไม่ทำอะไร
+        if (targetTr.classList.contains('bulk-selected')) return;
+
+        draggedRows.forEach((row) => {
+            tbody.insertBefore(row, targetTr);
+        });
+    });
     setTimeout(() => {
         enhanceEditableTitles();
-    }, 3000);
+        enhanceDoneColumn();
+        enhancePriorityColumn();
+
+        // --- Update draggable ตาม bulk-selected ---
+        const observer = new MutationObserver(() => {
+            document
+                .querySelectorAll('tbody tr.bulk-selected')
+                .forEach((tr) => tr.setAttribute('draggable', 'true'));
+            document
+                .querySelectorAll('tbody tr:not(.bulk-selected)')
+                .forEach((tr) => tr.removeAttribute('draggable'));
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class']
+        });
+    }, 1000);
 })();
