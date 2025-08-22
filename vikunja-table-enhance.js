@@ -16,6 +16,7 @@
     const UPDATED = 12; // "Updated"
     // ICON COLOR RGB 235,233,229
     const CREATED_BY = 13; // "Created By"
+    const taskCache = {};
     function getViewId() {
         return +(window.location.pathname.split('/').pop() ?? 0);
     }
@@ -112,6 +113,7 @@
      * @param td - The table cell element.
      */
     function initEditableCell(td) {
+        td.style.cursor = 'pointer';
         const link = td.querySelector('a');
         if (!link)
             return;
@@ -368,27 +370,50 @@
     /**
      * Retrieve all task IDs from the table rows.
      */
-    function getAllTaskIds() {
+    function getTaskIdsFromTable() {
         const taskLinks = document.querySelectorAll('tbody tr a');
-        return Array.from(taskLinks).map((link) => getTaskIdFromElement(link));
+        return [
+            ...new Set(Array.from(taskLinks).map((link) => getTaskIdFromElement(link)))
+        ];
     }
-    /**
-     * Fetch tasks data from API given an array of task IDs.
-     */
-    function fetchTasksByIds(taskIds) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: '/api/v1/tasks/all?filter=' +
-                    encodeURIComponent('id in ' + taskIds.join(',')),
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                onload: (response) => resolve(response),
-                onerror: (error) => reject(error)
+    async function fetchFromApiDynamic(taskIds) {
+        const result = [];
+        let remainingIds = [...taskIds];
+        while (remainingIds.length > 0) {
+            // ส่ง request กับทุก id ที่เหลือ
+            const res = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: '/api/v1/tasks/all?filter=' +
+                        encodeURIComponent('id in ' + remainingIds.join(',')),
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    onload: (r) => resolve(r),
+                    onerror: (e) => reject(e)
+                });
             });
-        });
+            const data = JSON.parse(res.responseText);
+            result.push(...data);
+            // ลบ id ที่ได้แล้ว
+            const fetchedIds = data.map((task) => task.id);
+            remainingIds = remainingIds.filter((id) => !fetchedIds.includes(id));
+            // ถ้า API คืนค่ามาน้อยกว่า request → ไม่มี id เหลือ → break
+            if (fetchedIds.length === 0)
+                break;
+        }
+        return result;
+    }
+    async function fetchTasksByIds(taskIds) {
+        const idsToFetch = taskIds.filter((id) => !taskCache[id]);
+        if (idsToFetch.length > 0) {
+            const fetchedTasks = await fetchFromApiDynamic(idsToFetch);
+            fetchedTasks.forEach((task) => {
+                taskCache[task.id] = task;
+            });
+        }
+        return taskIds.map((id) => taskCache[id]);
     }
     /**
      * Enhance the "Priority" column by replacing cells with dropdown selectors.
@@ -397,8 +422,7 @@
         const priorityIndex = getCheckedColumnIndex(PRIORITY);
         if (priorityIndex === -1)
             return;
-        const response = await fetchTasksByIds(getAllTaskIds());
-        const taskData = JSON.parse(response.responseText);
+        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
         const tbody = document.querySelector('tbody');
         if (!tbody)
             return;
@@ -504,12 +528,246 @@
                 updateSelectStyle(select, priority);
         });
     }
+    function utcToDatetimeLocal(utcString) {
+        const date = new Date(utcString);
+        const pad = (num) => String(num).padStart(2, '0');
+        const year = date.getFullYear();
+        const month = pad(date.getMonth() + 1); // Months are 0-based
+        const day = pad(date.getDate());
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+    /**
+     * Enhance a date column (start_date or due_date) with datetime-local inputs.
+     * @param columnKey - The constant for the column (START_DATE or DUE_DATE)
+     * @param className - The CSS class for the input element
+     * @param dateField - The field name in task data ('start_date' or 'due_date')
+     */
+    async function enhanceDateColumn(columnKey, className, dateField) {
+        const colIndex = getCheckedColumnIndex(columnKey);
+        if (colIndex === -1)
+            return;
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
+        cells.forEach((cell) => setupDateCell(cell, taskData, className, dateField));
+    }
+    /**
+     * Setup a single date cell with input element and change handler.
+     */
+    function setupDateCell(cell, taskData, className, dateField) {
+        const taskId = getTaskIdFromElement(cell);
+        const dateValue = taskData.find((task) => task.id === taskId)?.[dateField];
+        const input = document.createElement('input');
+        input.type = 'datetime-local';
+        input.classList.add(className);
+        if (dateValue && dateValue !== '0001-01-01T00:00:00Z') {
+            input.value = utcToDatetimeLocal(dateValue);
+        }
+        cell.innerHTML = '';
+        cell.appendChild(input);
+        input.addEventListener('change', () => handleDateChange(cell, input, dateField));
+    }
+    /**
+     * Handle change event for a date input (single or bulk update).
+     */
+    function handleDateChange(cell, input, dateField) {
+        const tr = cell.closest('tr');
+        if (!tr)
+            return;
+        const newDateUTC = new Date(input.value).toISOString();
+        if (tr.classList.contains('bulk-selected')) {
+            const rows = Array.from(document.querySelectorAll('tbody tr.bulk-selected'));
+            const taskIds = rows.map(getTaskIdByTr);
+            // Bulk API request
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/bulk`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({
+                    [dateField]: newDateUTC,
+                    task_ids: taskIds
+                })
+            });
+            // Update UI for all bulk-selected rows
+            rows.forEach((row) => {
+                const rowInput = row.querySelector(`.${input.className}`);
+                if (rowInput)
+                    rowInput.value = input.value;
+            });
+        }
+        else {
+            const taskId = getTaskIdFromElement(cell);
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/${taskId}`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({ [dateField]: newDateUTC })
+            });
+        }
+    }
+    /**
+     * Wrapper functions for specific columns
+     */
+    async function enhanceDueDateColumn() {
+        await enhanceDateColumn(DUE_DATE, 'due-date-datetime-local', 'due_date');
+    }
+    async function enhanceStartDateColumn() {
+        await enhanceDateColumn(START_DATE, 'start-date-datetime-local', 'start_date');
+    }
+    async function enhanceEndDateColumn() {
+        await enhanceDateColumn(END_DATE, 'end-date-datetime-local', 'end_date');
+    }
+    /**
+     * Enhance the "Progress" column to allow inline editing on double-click.
+     */
+    function enhanceProgressColumn() {
+        const colIndex = getCheckedColumnIndex(PROGRESS);
+        if (colIndex === -1)
+            return;
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        cells.forEach((cell) => {
+            cell.style.cursor = 'pointer';
+            attachProgressEditor(cell);
+        });
+    }
+    /**
+     * Attach double-click editor to a single cell.
+     */
+    function attachProgressEditor(cell) {
+        cell.addEventListener('dblclick', function (e) {
+            if (e.target && e.target.tagName === 'INPUT')
+                return;
+            const currentProgress = parseInt(cell.innerText) || 0;
+            const input = createProgressInput(currentProgress);
+            const label = document.createElement('span');
+            label.innerText = '%';
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            cell.appendChild(label);
+            // Focus and select the input for convenience
+            input.focus();
+            input.select();
+            // Bind events to handle saving/canceling
+            bindProgressInputEvents(input, cell, currentProgress);
+        });
+    }
+    /**
+     * Create an input element for editing progress.
+     */
+    function createProgressInput(value) {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = value.toString();
+        input.min = '0';
+        input.max = '100';
+        input.classList.add('edit-progress');
+        return input;
+    }
+    /**
+     * Check if the given progress value is valid (0–100).
+     */
+    function isValidProgress(progress) {
+        return !isNaN(progress) && progress >= 0 && progress <= 100;
+    }
+    /**
+     * Send API request to update progress for a single task.
+     */
+    function updateTaskProgress(taskId, newProgress) {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/${taskId}`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({ progress: newProgress })
+        });
+    }
+    /**
+     * Send API request to update progress for multiple tasks (bulk).
+     */
+    function updateBulkTaskProgress(taskIds, newProgress) {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/bulk`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                progress: newProgress,
+                task_ids: taskIds
+            })
+        });
+    }
+    /**
+     * Update the UI for bulk-selected rows after saving.
+     */
+    function updateBulkProgressUI(newProgress) {
+        const colIndex = getCheckedColumnIndex(PROGRESS);
+        document
+            .querySelectorAll('tbody tr.bulk-selected')
+            .forEach((row) => {
+            const td = row.querySelector(`td:nth-child(${colIndex + 1})`);
+            if (td)
+                td.innerText = `${newProgress}%`;
+        });
+    }
+    /**
+     * Bind event listeners for the progress input element.
+     */
+    function bindProgressInputEvents(input, cell, originalProgress) {
+        /**
+         * Save the progress value to the API and update the cell text.
+         */
+        const saveProgress = () => {
+            const newProgress = parseInt(input.value);
+            if (isValidProgress(newProgress)) {
+                const tr = cell.closest('tr');
+                const taskId = getTaskIdFromElement(cell);
+                if (tr?.classList.contains('bulk-selected')) {
+                    // Collect all bulk-selected task IDs
+                    const taskIds = Array.from(document.querySelectorAll('tbody tr.bulk-selected')).map(getTaskIdByTr);
+                    // Bulk update API request
+                    updateBulkTaskProgress(taskIds, newProgress);
+                    // Update UI for all bulk-selected rows
+                    updateBulkProgressUI(newProgress);
+                }
+                else {
+                    // Single task update
+                    updateTaskProgress(taskId, newProgress);
+                    cell.innerText = `${newProgress}%`;
+                }
+            }
+            else {
+                // Revert to original value if invalid
+                cell.innerText = `${originalProgress}%`;
+            }
+        };
+        // Save on Enter, cancel on Escape
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter')
+                saveProgress();
+            else if (e.key === 'Escape')
+                cell.innerText = `${originalProgress}%`;
+        });
+        // Save on blur (clicking outside)
+        input.addEventListener('blur', saveProgress);
+    }
     GM_addStyle(`
         .edit-title {
             border: none;
             background: transparent;
             color: transparent;
             transform: rotate(90deg);
+            display: none;
         }
         tbody tr:hover .editable-span.d-none + .edit-title {
             display: inline-block;
@@ -529,26 +787,26 @@
             display: none;
         }
     `);
-    let lastClickedIndex = null;
     let draggedRows = [];
     let lastDragOverTr = null;
     document.addEventListener('click', (e) => {
         const tr = e.target.closest('tr');
         const tbody = tr?.closest('tbody');
-        if (!tr || !tbody) {
+        if (!tr || !tbody)
             return;
-        }
-        const rows = Array.from(tbody.querySelectorAll('tbody tr'));
-        const clickedIndex = rows.indexOf(tr);
+        const rows = Array.from(tbody.querySelectorAll('tr'));
         if (e.target instanceof HTMLInputElement ||
-            e.target instanceof HTMLSelectElement) {
+            e.target instanceof HTMLSelectElement)
             return;
-        }
-        if (e.shiftKey && lastClickedIndex !== null) {
+        const lastClicked = tbody.querySelector('tr.last-clicked');
+        if (e.shiftKey && lastClicked) {
             rows.forEach((r) => r.classList.remove('bulk-selected'));
-            const [start, end] = [lastClickedIndex, clickedIndex].sort((a, b) => a - b);
-            for (let i = start; i <= end; i++)
+            const start = rows.indexOf(lastClicked);
+            const end = rows.indexOf(tr);
+            const [s, e_] = [start, end].sort((a, b) => a - b);
+            for (let i = s; i <= e_; i++) {
                 rows[i].classList.add('bulk-selected');
+            }
         }
         else if (e.ctrlKey || e.metaKey) {
             tr.classList.toggle('bulk-selected');
@@ -557,7 +815,9 @@
             rows.forEach((r) => r.classList.remove('bulk-selected'));
             tr.classList.add('bulk-selected');
         }
-        lastClickedIndex = clickedIndex;
+        // Update last-clicked
+        rows.forEach((r) => r.classList.remove('last-clicked'));
+        tr.classList.add('last-clicked');
         e.preventDefault();
     });
     // --- Drag & Drop ---
@@ -616,6 +876,10 @@
         enhanceEditableTitles();
         enhanceDoneColumn();
         enhancePriorityColumn();
+        enhanceDueDateColumn();
+        enhanceStartDateColumn();
+        enhanceEndDateColumn();
+        enhanceProgressColumn();
         // --- Update draggable ตาม bulk-selected ---
         const observer = new MutationObserver(() => {
             document

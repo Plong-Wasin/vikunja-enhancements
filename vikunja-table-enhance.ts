@@ -69,6 +69,45 @@ interface RelatedTasks {
     parenttask?: Task[];
 }
 
+interface User {
+    id: number;
+    name: string;
+    username: string;
+    created: string;
+    updated: string;
+    settings: Settings;
+    deletion_scheduled_at: string;
+    is_local_user: boolean;
+    auth_provider: string;
+}
+
+interface Settings {
+    name: string;
+    email_reminders_enabled: boolean;
+    discoverable_by_name: boolean;
+    discoverable_by_email: boolean;
+    overdue_tasks_reminders_enabled: boolean;
+    overdue_tasks_reminders_time: string;
+    default_project_id: number;
+    week_start: number;
+    language: string;
+    timezone: string;
+    frontend_settings: FrontendSettings;
+    extra_settings_links: null;
+}
+
+interface FrontendSettings {
+    allow_icon_changes: boolean;
+    color_schema: string;
+    date_display: string;
+    default_view: string;
+    minimum_priority: number;
+    play_sound_when_done: boolean;
+    quick_add_magic_mode: string;
+}
+
+type TaskDateField = 'start_date' | 'due_date' | 'end_date';
+
 (function () {
     'use strict';
 
@@ -87,6 +126,8 @@ interface RelatedTasks {
     const UPDATED = 12; // "Updated"
     // ICON COLOR RGB 235,233,229
     const CREATED_BY = 13; // "Created By"
+
+    const taskCache: Record<number, Task> = {};
 
     function getViewId(): number {
         return +(window.location.pathname.split('/').pop() ?? 0);
@@ -202,6 +243,7 @@ interface RelatedTasks {
      * @param td - The table cell element.
      */
     function initEditableCell(td: HTMLTableCellElement) {
+        td.style.cursor = 'pointer';
         const link = td.querySelector<HTMLAnchorElement>('a');
         if (!link) return;
 
@@ -516,32 +558,68 @@ interface RelatedTasks {
     /**
      * Retrieve all task IDs from the table rows.
      */
-    function getAllTaskIds(): number[] {
+    function getTaskIdsFromTable(): number[] {
         const taskLinks =
             document.querySelectorAll<HTMLAnchorElement>('tbody tr a');
-        return Array.from(taskLinks).map((link) => getTaskIdFromElement(link));
+        return [
+            ...new Set(
+                Array.from(taskLinks).map((link) => getTaskIdFromElement(link))
+            )
+        ];
     }
 
-    /**
-     * Fetch tasks data from API given an array of task IDs.
-     */
-    function fetchTasksByIds(
-        taskIds: number[]
-    ): Promise<Tampermonkey.Response<any>> {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url:
-                    '/api/v1/tasks/all?filter=' +
-                    encodeURIComponent('id in ' + taskIds.join(',')),
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                onload: (response) => resolve(response),
-                onerror: (error) => reject(error)
+    async function fetchFromApiDynamic(taskIds: number[]): Promise<Task[]> {
+        const result: Task[] = [];
+        let remainingIds = [...taskIds];
+
+        while (remainingIds.length > 0) {
+            // ส่ง request กับทุก id ที่เหลือ
+            const res: Tampermonkey.Response<any> = await new Promise(
+                (resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url:
+                            '/api/v1/tasks/all?filter=' +
+                            encodeURIComponent(
+                                'id in ' + remainingIds.join(',')
+                            ),
+                        headers: {
+                            Authorization: `Bearer ${getJwtToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        onload: (r) => resolve(r),
+                        onerror: (e) => reject(e)
+                    });
+                }
+            );
+
+            const data = JSON.parse(res.responseText);
+            result.push(...data);
+
+            // ลบ id ที่ได้แล้ว
+            const fetchedIds = data.map((task: any) => task.id);
+            remainingIds = remainingIds.filter(
+                (id) => !fetchedIds.includes(id)
+            );
+
+            // ถ้า API คืนค่ามาน้อยกว่า request → ไม่มี id เหลือ → break
+            if (fetchedIds.length === 0) break;
+        }
+
+        return result;
+    }
+
+    async function fetchTasksByIds(taskIds: number[]): Promise<Task[]> {
+        const idsToFetch = taskIds.filter((id) => !taskCache[id]);
+
+        if (idsToFetch.length > 0) {
+            const fetchedTasks = await fetchFromApiDynamic(idsToFetch);
+            fetchedTasks.forEach((task) => {
+                taskCache[task.id] = task;
             });
-        });
+        }
+
+        return taskIds.map((id) => taskCache[id]);
     }
 
     /**
@@ -551,8 +629,7 @@ interface RelatedTasks {
         const priorityIndex = getCheckedColumnIndex(PRIORITY);
         if (priorityIndex === -1) return;
 
-        const response = await fetchTasksByIds(getAllTaskIds());
-        const taskData: Task[] = JSON.parse(response.responseText);
+        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
 
         const tbody = document.querySelector('tbody');
         if (!tbody) return;
@@ -686,6 +763,322 @@ interface RelatedTasks {
             if (select) updateSelectStyle(select, priority);
         });
     }
+    function utcToDatetimeLocal(utcString: string) {
+        const date = new Date(utcString);
+
+        const pad = (num: number) => String(num).padStart(2, '0');
+
+        const year = date.getFullYear();
+        const month = pad(date.getMonth() + 1); // Months are 0-based
+        const day = pad(date.getDate());
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+    /**
+     * Enhance a date column (start_date or due_date) with datetime-local inputs.
+     * @param columnKey - The constant for the column (START_DATE or DUE_DATE)
+     * @param className - The CSS class for the input element
+     * @param dateField - The field name in task data ('start_date' or 'due_date')
+     */
+    async function enhanceDateColumn(
+        columnKey: number,
+        className: string,
+        dateField: TaskDateField
+    ) {
+        const colIndex = getCheckedColumnIndex(columnKey);
+        if (colIndex === -1) return;
+
+        const cells = document.querySelectorAll<HTMLTableCellElement>(
+            `table td:nth-child(${colIndex + 1})`
+        );
+
+        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
+
+        cells.forEach((cell) =>
+            setupDateCell(cell, taskData, className, dateField)
+        );
+    }
+
+    /**
+     * Setup a single date cell with input element and change handler.
+     */
+    function setupDateCell(
+        cell: HTMLTableCellElement,
+        taskData: Task[],
+        className: string,
+        dateField: TaskDateField
+    ) {
+        const taskId = getTaskIdFromElement(cell);
+        const dateValue = taskData.find((task) => task.id === taskId)?.[
+            dateField
+        ];
+
+        const input = document.createElement('input');
+        input.type = 'datetime-local';
+        input.classList.add(className);
+
+        if (dateValue && dateValue !== '0001-01-01T00:00:00Z') {
+            input.value = utcToDatetimeLocal(dateValue);
+        }
+
+        cell.innerHTML = '';
+        cell.appendChild(input);
+
+        input.addEventListener('change', () =>
+            handleDateChange(cell, input, dateField)
+        );
+    }
+
+    /**
+     * Handle change event for a date input (single or bulk update).
+     */
+    function handleDateChange(
+        cell: HTMLTableCellElement,
+        input: HTMLInputElement,
+        dateField: TaskDateField
+    ) {
+        const tr = cell.closest('tr');
+        if (!tr) return;
+
+        const newDateUTC = new Date(input.value).toISOString();
+
+        if (tr.classList.contains('bulk-selected')) {
+            const rows = Array.from(
+                document.querySelectorAll<HTMLTableRowElement>(
+                    'tbody tr.bulk-selected'
+                )
+            );
+            const taskIds = rows.map(getTaskIdByTr);
+
+            // Bulk API request
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/bulk`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({
+                    [dateField]: newDateUTC,
+                    task_ids: taskIds
+                })
+            });
+
+            // Update UI for all bulk-selected rows
+            rows.forEach((row) => {
+                const rowInput = row.querySelector<HTMLInputElement>(
+                    `.${input.className}`
+                );
+                if (rowInput) rowInput.value = input.value;
+            });
+        } else {
+            const taskId = getTaskIdFromElement(cell);
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/${taskId}`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({ [dateField]: newDateUTC })
+            });
+        }
+    }
+
+    /**
+     * Wrapper functions for specific columns
+     */
+    async function enhanceDueDateColumn() {
+        await enhanceDateColumn(
+            DUE_DATE,
+            'due-date-datetime-local',
+            'due_date'
+        );
+    }
+
+    async function enhanceStartDateColumn() {
+        await enhanceDateColumn(
+            START_DATE,
+            'start-date-datetime-local',
+            'start_date'
+        );
+    }
+
+    async function enhanceEndDateColumn() {
+        await enhanceDateColumn(
+            END_DATE,
+            'end-date-datetime-local',
+            'end_date'
+        );
+    }
+
+    /**
+     * Enhance the "Progress" column to allow inline editing on double-click.
+     */
+    function enhanceProgressColumn() {
+        const colIndex = getCheckedColumnIndex(PROGRESS);
+        if (colIndex === -1) return;
+
+        const cells = document.querySelectorAll<HTMLTableCellElement>(
+            `table td:nth-child(${colIndex + 1})`
+        );
+
+        cells.forEach((cell) => {
+            cell.style.cursor = 'pointer';
+            attachProgressEditor(cell);
+        });
+    }
+
+    /**
+     * Attach double-click editor to a single cell.
+     */
+    function attachProgressEditor(cell: HTMLTableCellElement) {
+        cell.addEventListener('dblclick', function (e) {
+            if (e.target && (e.target as HTMLElement).tagName === 'INPUT')
+                return;
+            const currentProgress = parseInt(cell.innerText) || 0;
+            const input = createProgressInput(currentProgress);
+            const label = document.createElement('span');
+            label.innerText = '%';
+
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            cell.appendChild(label);
+
+            // Focus and select the input for convenience
+            input.focus();
+            input.select();
+
+            // Bind events to handle saving/canceling
+            bindProgressInputEvents(input, cell, currentProgress);
+        });
+    }
+
+    /**
+     * Create an input element for editing progress.
+     */
+    function createProgressInput(value: number): HTMLInputElement {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = value.toString();
+        input.min = '0';
+        input.max = '100';
+        input.classList.add('edit-progress');
+        return input;
+    }
+
+    /**
+     * Check if the given progress value is valid (0–100).
+     */
+    function isValidProgress(progress: number): boolean {
+        return !isNaN(progress) && progress >= 0 && progress <= 100;
+    }
+
+    /**
+     * Send API request to update progress for a single task.
+     */
+    function updateTaskProgress(taskId: number, newProgress: number): void {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/${taskId}`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({ progress: newProgress })
+        });
+    }
+
+    /**
+     * Send API request to update progress for multiple tasks (bulk).
+     */
+    function updateBulkTaskProgress(
+        taskIds: number[],
+        newProgress: number
+    ): void {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/bulk`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                progress: newProgress,
+                task_ids: taskIds
+            })
+        });
+    }
+
+    /**
+     * Update the UI for bulk-selected rows after saving.
+     */
+    function updateBulkProgressUI(newProgress: number): void {
+        const colIndex = getCheckedColumnIndex(PROGRESS);
+        document
+            .querySelectorAll<HTMLTableRowElement>('tbody tr.bulk-selected')
+            .forEach((row) => {
+                const td = row.querySelector<HTMLTableCellElement>(
+                    `td:nth-child(${colIndex + 1})`
+                );
+                if (td) td.innerText = `${newProgress}%`;
+            });
+    }
+
+    /**
+     * Bind event listeners for the progress input element.
+     */
+    function bindProgressInputEvents(
+        input: HTMLInputElement,
+        cell: HTMLTableCellElement,
+        originalProgress: number
+    ) {
+        /**
+         * Save the progress value to the API and update the cell text.
+         */
+        const saveProgress = () => {
+            const newProgress = parseInt(input.value);
+
+            if (isValidProgress(newProgress)) {
+                const tr = cell.closest('tr');
+                const taskId = getTaskIdFromElement(cell);
+
+                if (tr?.classList.contains('bulk-selected')) {
+                    // Collect all bulk-selected task IDs
+                    const taskIds = Array.from(
+                        document.querySelectorAll<HTMLTableRowElement>(
+                            'tbody tr.bulk-selected'
+                        )
+                    ).map(getTaskIdByTr);
+
+                    // Bulk update API request
+                    updateBulkTaskProgress(taskIds, newProgress);
+
+                    // Update UI for all bulk-selected rows
+                    updateBulkProgressUI(newProgress);
+                } else {
+                    // Single task update
+                    updateTaskProgress(taskId, newProgress);
+                    cell.innerText = `${newProgress}%`;
+                }
+            } else {
+                // Revert to original value if invalid
+                cell.innerText = `${originalProgress}%`;
+            }
+        };
+
+        // Save on Enter, cancel on Escape
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') saveProgress();
+            else if (e.key === 'Escape')
+                cell.innerText = `${originalProgress}%`;
+        });
+
+        // Save on blur (clicking outside)
+        input.addEventListener('blur', saveProgress);
+    }
 
     GM_addStyle(`
         .edit-title {
@@ -693,6 +1086,7 @@ interface RelatedTasks {
             background: transparent;
             color: transparent;
             transform: rotate(90deg);
+            display: none;
         }
         tbody tr:hover .editable-span.d-none + .edit-title {
             display: inline-block;
@@ -712,7 +1106,6 @@ interface RelatedTasks {
             display: none;
         }
     `);
-    let lastClickedIndex: number | null = null;
     let draggedRows: HTMLTableRowElement[] = [];
     let lastDragOverTr: HTMLTableRowElement | null = null;
 
@@ -720,27 +1113,27 @@ interface RelatedTasks {
         const tr = (e.target as HTMLElement).closest('tr');
         const tbody = tr?.closest('tbody');
 
-        if (!tr || !tbody) {
-            return;
-        }
+        if (!tr || !tbody) return;
 
-        const rows = Array.from(tbody.querySelectorAll('tbody tr'));
-        const clickedIndex = rows.indexOf(tr);
+        const rows = Array.from(tbody.querySelectorAll('tr'));
 
         if (
             e.target instanceof HTMLInputElement ||
             e.target instanceof HTMLSelectElement
-        ) {
+        )
             return;
-        }
 
-        if (e.shiftKey && lastClickedIndex !== null) {
+        const lastClicked =
+            tbody.querySelector<HTMLTableRowElement>('tr.last-clicked');
+
+        if (e.shiftKey && lastClicked) {
             rows.forEach((r) => r.classList.remove('bulk-selected'));
-            const [start, end] = [lastClickedIndex, clickedIndex].sort(
-                (a, b) => a - b
-            );
-            for (let i = start; i <= end; i++)
+            const start = rows.indexOf(lastClicked);
+            const end = rows.indexOf(tr);
+            const [s, e_] = [start, end].sort((a, b) => a - b);
+            for (let i = s; i <= e_; i++) {
                 rows[i].classList.add('bulk-selected');
+            }
         } else if (e.ctrlKey || e.metaKey) {
             tr.classList.toggle('bulk-selected');
         } else {
@@ -748,7 +1141,10 @@ interface RelatedTasks {
             tr.classList.add('bulk-selected');
         }
 
-        lastClickedIndex = clickedIndex;
+        // Update last-clicked
+        rows.forEach((r) => r.classList.remove('last-clicked'));
+        tr.classList.add('last-clicked');
+
         e.preventDefault();
     });
 
@@ -820,6 +1216,10 @@ interface RelatedTasks {
         enhanceEditableTitles();
         enhanceDoneColumn();
         enhancePriorityColumn();
+        enhanceDueDateColumn();
+        enhanceStartDateColumn();
+        enhanceEndDateColumn();
+        enhanceProgressColumn();
 
         // --- Update draggable ตาม bulk-selected ---
         const observer = new MutationObserver(() => {
