@@ -17,6 +17,8 @@
     // ICON COLOR RGB 235,233,229
     const CREATED_BY = 13; // "Created By"
     const taskCache = {};
+    const avatarCache = {};
+    const assigneeSearchCache = new Map();
     function getViewId() {
         return +(window.location.pathname.split('/').pop() ?? 0);
     }
@@ -81,8 +83,6 @@
      * @returns The task ID as a number, or 0 if not found.
      */
     function getTaskIdFromElement(el) {
-        if (el instanceof HTMLTableRowElement)
-            return getTaskIdByTr(el);
         const tr = el.closest('tr');
         return getTaskIdByTr(tr);
     }
@@ -144,7 +144,7 @@
     function createEditableSpan() {
         const span = document.createElement('span');
         span.contentEditable = 'true';
-        span.classList.add('d-none');
+        span.classList.add('hidden');
         span.classList.add('editable-span');
         return span;
     }
@@ -165,8 +165,8 @@
      */
     function activateEditMode(link, span) {
         span.textContent = link.textContent || '';
-        link.classList.add('d-none');
-        span.classList.remove('d-none');
+        link.classList.add('hidden');
+        span.classList.remove('hidden');
         focusCursorToEnd(span);
     }
     /**
@@ -255,8 +255,8 @@
      */
     function resetView(link, span, text) {
         link.textContent = text;
-        link.classList.remove('d-none');
-        span.classList.add('d-none');
+        link.classList.remove('hidden');
+        span.classList.add('hidden');
     }
     /**
      * Enhance the "Done" column with checkboxes.
@@ -365,7 +365,7 @@
      * Show or hide the "Done" label based on checkbox state.
      */
     function syncDoneState(doneElement, isChecked) {
-        doneElement.classList.toggle('d-none', !isChecked);
+        doneElement.classList.toggle('hidden', !isChecked);
     }
     /**
      * Retrieve all task IDs from the table rows.
@@ -414,6 +414,9 @@
             });
         }
         return taskIds.map((id) => taskCache[id]);
+    }
+    async function fetchTaskById(taskId) {
+        return (await fetchTasksByIds([taskId]))[0];
     }
     /**
      * Enhance the "Priority" column by replacing cells with dropdown selectors.
@@ -761,6 +764,451 @@
         // Save on blur (clicking outside)
         input.addEventListener('blur', saveProgress);
     }
+    /**
+     * Entry point: Enhance the assignees column by making cells clickable and attaching the editor.
+     */
+    function enhanceAssigneesColumn() {
+        const colIndex = getCheckedColumnIndex(ASSIGNEES);
+        if (colIndex === -1)
+            return;
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        cells.forEach((cell) => {
+            cell.style.cursor = 'pointer';
+            attachAssigneesEditor(cell);
+        });
+    }
+    /**
+     * Attach click listener that opens the assignees menu.
+     */
+    function attachAssigneesEditor(cell) {
+        cell.addEventListener('click', (e) => {
+            const target = e.target;
+            // Prevent reopening when clicking inside the menu
+            if ((target && target.closest('#assigneesMenu')) ||
+                !document.contains(target))
+                return;
+            closeExistingMenu();
+            openMenuForCell(cell);
+        });
+    }
+    /**
+     * Close any currently opened assignees menu.
+     */
+    function closeExistingMenu() {
+        document.querySelector('#assigneesMenu')?.remove();
+    }
+    /**
+     * Open menu for a specific table cell.
+     */
+    function openMenuForCell(cell) {
+        cell.style.position = 'relative';
+        const assigneesMenu = createAssigneesMenu();
+        cell.appendChild(assigneesMenu);
+        openAssigneesMenu(cell, assigneesMenu);
+    }
+    /**
+     * Create the base DOM structure for the assignees menu.
+     */
+    function createAssigneesMenu() {
+        const menu = document.createElement('div');
+        menu.id = 'assigneesMenu';
+        menu.className = 'multiselect';
+        menu.tabIndex = -1;
+        Object.assign(menu.style, {
+            position: 'absolute',
+            display: 'none',
+            background: 'var(--scheme-main)',
+            border: '1px solid #ccc',
+            width: '250px',
+            zIndex: 10000,
+            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+            cursor: 'default',
+            top: '0',
+            left: '0'
+        });
+        // Selected assignees list
+        const selectedList = document.createElement('div');
+        selectedList.className = 'selected-list';
+        selectedList.id = 'assigneesSelectedList';
+        // Input wrapper
+        const control = document.createElement('div');
+        control.className = 'control';
+        Object.assign(control.style, {
+            padding: '5px',
+            borderBottom: '1px solid #ccc',
+            borderTop: '1px solid #ccc'
+        });
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'input-wrapper';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'input';
+        input.placeholder = 'Type to assign…';
+        Object.assign(input.style, {
+            width: '100%',
+            border: 'none',
+            outline: 'none',
+            background: 'transparent'
+        });
+        inputWrapper.appendChild(input);
+        control.appendChild(inputWrapper);
+        // Search results container
+        const searchResults = document.createElement('div');
+        searchResults.className = 'search-results';
+        menu.appendChild(selectedList);
+        menu.appendChild(control);
+        menu.appendChild(searchResults);
+        return menu;
+    }
+    /**
+     * Debounce utility: delays execution until after delay has passed.
+     */
+    function debounce(func, delay = 300) {
+        let timeout;
+        return function (...args) {
+            if (timeout)
+                clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), delay);
+        };
+    }
+    /**
+     * Throttle utility: ensures function is not called more than once in limit.
+     */
+    function throttle(func, limit) {
+        let inThrottle = false;
+        return function (...args) {
+            if (!inThrottle) {
+                func.apply(this, args);
+                inThrottle = true;
+                setTimeout(() => (inThrottle = false), limit);
+            }
+        };
+    }
+    /**
+     * Show the menu and initialize its content.
+     */
+    async function openAssigneesMenu(cell, assigneesMenu) {
+        assigneesMenu.style.display = 'block';
+        const input = assigneesMenu.querySelector('.input');
+        const assigneesSelectedList = assigneesMenu.querySelector('#assigneesSelectedList');
+        if (!assigneesSelectedList)
+            return;
+        await refreshAssigneesList(cell, assigneesSelectedList);
+        setupSearchInput(input, assigneesMenu);
+        setupOutsideClickHandler(cell, assigneesMenu);
+    }
+    /**
+     * Refresh the list of selected assignees inside the menu.
+     */
+    async function refreshAssigneesList(cell, assigneesSelectedList) {
+        assigneesSelectedList.innerHTML = '';
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+        if (task?.assignees) {
+            for (const assignee of task.assignees) {
+                assigneesSelectedList.appendChild(await createAssigneeItem(assignee));
+            }
+        }
+    }
+    /**
+     * Create a selected assignee item with avatar and remove button.
+     */
+    async function createAssigneeItem(assignee) {
+        const div = document.createElement('div');
+        div.className = 'user m-2';
+        Object.assign(div.style, {
+            position: 'relative',
+            display: 'inline-block'
+        });
+        const img = document.createElement('img');
+        img.height = 30;
+        img.width = 30;
+        img.className = 'avatar v-popper--has-tooltip';
+        img.src = await fetchAvatar(assignee.username);
+        img.title = assignee.name || assignee.username;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className =
+            'base-button base-button--type-button remove-assignee';
+        button.innerText = 'X';
+        Object.assign(button.style, {
+            position: 'absolute',
+            top: '-4px',
+            right: '-4px',
+            width: '16px',
+            height: '16px',
+            borderRadius: '50%',
+            background: 'red',
+            color: 'white',
+            border: 'none',
+            fontSize: '12px',
+            cursor: 'pointer',
+            lineHeight: '16px',
+            textAlign: 'center',
+            padding: '0'
+        });
+        div.appendChild(img);
+        div.appendChild(button);
+        button.addEventListener('click', () => {
+            const tr = button.closest('tr');
+            if (!tr)
+                return;
+            if (tr.classList.contains('bulk-selected')) {
+                const rows = document.querySelectorAll('tr.bulk-selected');
+                for (const row of rows) {
+                    const taskId = getTaskIdFromElement(row);
+                    taskCache[taskId].assignees ??= [];
+                    taskCache[taskId].assignees = taskCache[taskId].assignees.filter((a) => a.id !== assignee.id);
+                    GM_xmlhttpRequest({
+                        method: 'DELETE',
+                        url: `/api/v1/tasks/${taskId}/assignees/${assignee.id}`,
+                        headers: {
+                            Authorization: `Bearer ${getJwtToken()}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                }
+            }
+            else {
+                const taskId = getTaskIdFromElement(tr);
+                taskCache[taskId].assignees ??= [];
+                taskCache[taskId].assignees = taskCache[taskId].assignees.filter((a) => a.id !== assignee.id);
+                GM_xmlhttpRequest({
+                    method: 'DELETE',
+                    url: `/api/v1/tasks/${taskId}/assignees/${assignee.id}`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+            }
+            updateAndRefreshAssignees();
+        });
+        return div;
+    }
+    /**
+     * Update the search results and refresh the selected assignees list.
+     */
+    async function updateAndRefreshAssignees() {
+        const assigneesMenu = document.querySelector('#assigneesMenu');
+        if (!assigneesMenu)
+            return;
+        const cell = assigneesMenu.closest('td');
+        if (!cell)
+            return;
+        const assigneesSelectedList = document.querySelector('#assigneesSelectedList');
+        if (!assigneesSelectedList)
+            return;
+        await updateAssigneesSearchResults(assigneesMenu, cell);
+        await refreshAssigneesList(cell, assigneesSelectedList);
+    }
+    async function updateAssigneesSearchResults(assigneesMenu, cell) {
+        const buttons = assigneesMenu.querySelectorAll('.search-results button');
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+        const taskAssignees = task?.assignees || [];
+        buttons.forEach((btn) => {
+            const assigneeId = parseInt(btn.dataset.assigneeId);
+            btn.style.display = taskAssignees.some((a) => a.id === assigneeId)
+                ? 'none'
+                : 'flex';
+        });
+    }
+    /**
+     * Fetch avatar image as base64 and cache it.
+     */
+    function fetchAvatar(username) {
+        const size = 30;
+        if (avatarCache[username]) {
+            return Promise.resolve(avatarCache[username]);
+        }
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                url: `/api/v1/avatar/${username}?size=${size}`,
+                method: 'GET',
+                headers: { Authorization: `Bearer ${getJwtToken()}` },
+                responseType: 'blob',
+                onload: (response) => {
+                    const blob = response.response;
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        if (typeof reader.result === 'string') {
+                            avatarCache[username] = reader.result;
+                            resolve(reader.result);
+                        }
+                        else {
+                            reject(new Error('Failed to read avatar as base64'));
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                },
+                onerror: reject
+            });
+        });
+    }
+    /**
+     * Setup search input event with debounce.
+     */
+    async function setupSearchInput(input, assigneesMenu) {
+        if (!input)
+            return;
+        input.focus();
+        const task = await fetchTaskById(getTaskIdFromElement(input));
+        const debouncedSearch = debounce(() => handleAssigneeSearch(input, assigneesMenu, task.project_id), 300);
+        input.addEventListener('input', debouncedSearch);
+        // Trigger an initial search
+        handleAssigneeSearch(input, assigneesMenu, task.project_id);
+    }
+    /**
+     * Handle assignee search request and render results.
+     */
+    function handleAssigneeSearch(input, menu, projectId) {
+        const query = input.value.trim();
+        const searchResults = menu.querySelector('.search-results');
+        if (!searchResults)
+            return;
+        const cacheKey = `${projectId}:${query}`;
+        // ✅ Use cache if available
+        if (assigneeSearchCache.has(cacheKey)) {
+            renderAssignees(searchResults, assigneeSearchCache.get(cacheKey));
+            return;
+        }
+        // Otherwise fetch from API
+        GM_xmlhttpRequest({
+            url: `/api/v1/projects/${projectId}/projectusers?s=${encodeURIComponent(query)}`,
+            method: 'GET',
+            headers: { Authorization: `Bearer ${getJwtToken()}` },
+            responseType: 'json',
+            onload: async (response) => {
+                const assignees = response.response ?? [];
+                // ✅ Save result in cache
+                assigneeSearchCache.set(cacheKey, assignees);
+                renderAssignees(searchResults, assignees);
+            }
+        });
+    }
+    // Helper function to render assignees
+    async function renderAssignees(container, assignees) {
+        container.innerHTML = '';
+        for (const assignee of assignees) {
+            const avatar = await fetchAvatar(assignee.username);
+            const btn = createAssigneeSearchButton(assignee, avatar);
+            container.appendChild(btn);
+        }
+        updateAndRefreshAssignees();
+    }
+    function createAssigneeSearchButton(assignee, avatar) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.assigneeId = assignee.id.toString();
+        Object.assign(btn.style, {
+            width: '100%',
+            border: 'none',
+            background: 'transparent',
+            padding: '6px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+        });
+        btn.innerHTML = `
+      <div style="display:flex; align-items:center; gap:6px;">
+        <img class="avatar" src="${avatar}" height="30" width="30" />
+        <span style="color: var(--input-color);">
+          ${assignee.name || assignee.username}
+        </span>
+      </div>
+      <span style="font-size:12px; color:#888;">Enter or click</span>
+    `;
+        btn.addEventListener('click', () => {
+            if (btn.closest('tr')?.classList.contains('bulk-selected')) {
+                const rows = document.querySelectorAll('tr.bulk-selected');
+                for (const row of rows) {
+                    const taskId = getTaskIdFromElement(row);
+                    taskCache[taskId].assignees ??= [];
+                    GM_xmlhttpRequest({
+                        method: 'PUT',
+                        url: `/api/v1/tasks/${taskId}/assignees`,
+                        headers: {
+                            Authorization: `Bearer ${getJwtToken()}`,
+                            'Content-Type': 'application/json'
+                        },
+                        data: JSON.stringify({ user_id: assignee.id })
+                    });
+                    if (taskCache[taskId].assignees.find((a) => a.id === assignee.id))
+                        return;
+                    taskCache[taskId].assignees.push(assignee);
+                }
+            }
+            else {
+                const taskId = getTaskIdFromElement(btn);
+                GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: `/api/v1/tasks/${taskId}/assignees`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({ user_id: assignee.id })
+                });
+                taskCache[taskId].assignees ??= [];
+                if (taskCache[taskId].assignees.find((a) => a.id === assignee.id))
+                    return;
+            }
+            btn.style.display = 'none';
+            updateAndRefreshAssignees();
+        });
+        return btn;
+    }
+    /**
+     * Close the menu when clicking outside.
+     */
+    function setupOutsideClickHandler(cell, assigneesMenu) {
+        document.addEventListener('click', function clickOutside(e) {
+            if (!cell.contains(e.target) &&
+                document.contains(e.target)) {
+                assigneesMenu.remove();
+                document.removeEventListener('click', clickOutside);
+                refreshAssignessColumn();
+            }
+        });
+    }
+    /**
+     * Refresh all assignees in the table after closing menu.
+     */
+    async function refreshAssignessColumn() {
+        const colIndex = getCheckedColumnIndex(ASSIGNEES);
+        if (colIndex === -1)
+            return;
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        for (const cell of cells) {
+            cell.innerHTML = '';
+            const task = await fetchTaskById(getTaskIdFromElement(cell));
+            const assignees = task.assignees;
+            if (!assignees)
+                continue;
+            const assigneesList = document.createElement('div');
+            assigneesList.className = 'assignees-list is-inline mis-1';
+            for (const assignee of assignees) {
+                const assigneeEl = document.createElement('span');
+                assigneeEl.className = 'assignee';
+                const userDiv = document.createElement('div');
+                userDiv.className = 'user';
+                userDiv.style.display = 'inline';
+                const avatar = document.createElement('img');
+                avatar.className = 'avatar v-popper--has-tooltip';
+                avatar.width = 28;
+                avatar.height = 28;
+                avatar.style.border = '2px solid var(--white)';
+                avatar.style.borderRadius = '100%';
+                avatar.title = assignee.name || assignee.username;
+                avatar.src = await fetchAvatar(assignee.username);
+                userDiv.appendChild(avatar);
+                assigneeEl.appendChild(userDiv);
+                assigneesList.appendChild(assigneeEl);
+            }
+            cell.appendChild(assigneesList);
+        }
+    }
     GM_addStyle(`
         .edit-title {
             border: none;
@@ -769,7 +1217,7 @@
             transform: rotate(90deg);
             display: none;
         }
-        tbody tr:hover .editable-span.d-none + .edit-title {
+        tbody tr:hover .editable-span.hidden + .edit-title {
             display: inline-block;
             color: rgba(235, 233, 229, 0.9);
             cursor: pointer;
@@ -783,7 +1231,7 @@
         tbody td:hover {
             background: var(--pre-background);
         }
-        .d-none {
+        .hidden {
             display: none;
         }
     `);
@@ -872,28 +1320,39 @@
             tbody.insertBefore(row, targetTr);
         });
     });
-    setTimeout(() => {
-        enhanceEditableTitles();
-        enhanceDoneColumn();
-        enhancePriorityColumn();
-        enhanceDueDateColumn();
-        enhanceStartDateColumn();
-        enhanceEndDateColumn();
-        enhanceProgressColumn();
-        // --- Update draggable ตาม bulk-selected ---
-        const observer = new MutationObserver(() => {
-            document
-                .querySelectorAll('tbody tr.bulk-selected')
-                .forEach((tr) => tr.setAttribute('draggable', 'true'));
-            document
-                .querySelectorAll('tbody tr:not(.bulk-selected)')
-                .forEach((tr) => tr.removeAttribute('draggable'));
-        });
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['class']
-        });
-    }, 1000);
+    // Create observer
+    const observer = new MutationObserver((mutationsList, obs) => {
+        if (!document.querySelector('table tbody tr td'))
+            return;
+        setTimeout(() => {
+            enhanceEditableTitles();
+            enhanceDoneColumn();
+            enhancePriorityColumn();
+            enhanceDueDateColumn();
+            enhanceStartDateColumn();
+            enhanceEndDateColumn();
+            enhanceProgressColumn();
+            enhanceAssigneesColumn();
+            // --- Update draggable ตาม bulk-selected ---
+            const observer = new MutationObserver(() => {
+                document
+                    .querySelectorAll('tbody tr.bulk-selected')
+                    .forEach((tr) => tr.setAttribute('draggable', 'true'));
+                document
+                    .querySelectorAll('tbody tr:not(.bulk-selected)')
+                    .forEach((tr) => tr.removeAttribute('draggable'));
+            });
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['class']
+            });
+            obs.disconnect();
+        }, 100);
+    });
+    // Configure what to observe
+    const config = { attributes: true, childList: true, subtree: true };
+    // Start observing
+    observer.observe(document.body, config);
 })();
