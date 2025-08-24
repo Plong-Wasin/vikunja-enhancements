@@ -138,6 +138,25 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     const taskCache: Record<number, Task> = {};
     const avatarCache: Record<string, string> = {};
     const assigneeSearchCache = new Map<string, Assignee[]>();
+    const labelSearchCache = new Map<string, Label[]>();
+
+    const COLORS = [
+        '#ffbe0b',
+        '#fd8a09',
+        '#fb5607',
+        '#ff006e',
+        '#efbdeb',
+        '#8338ec',
+        '#5f5ff6',
+        '#3a86ff',
+        '#4c91ff',
+        '#0ead69',
+        '#25be8b',
+        '#073b4c',
+        '#373f47'
+    ];
+    const LIGHT = 'hsl(220, 13%, 91%)'; // grey-200
+    const DARK = 'hsl(215, 27.9%, 16.9%)'; // grey-800
 
     function getViewId(): number {
         return +(window.location.pathname.split('/').pop() ?? 0);
@@ -474,7 +493,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         return `
         <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="checkbox" ${isChecked ? 'checked' : ''}/>
+            <input class="bulk-edit" type="checkbox" ${
+                isChecked ? 'checked' : ''
+            }/>
             ${doneLabel}
         </div>
     `;
@@ -683,6 +704,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function createPrioritySelect(): HTMLSelectElement {
         const select = document.createElement('select');
         select.classList.add('priority-select');
+        select.classList.add('bulk-edit');
         select.innerHTML = `
         <option value="0" style="color: var(--info);">Unset</option>
         <option value="1" style="color: var(--info);">Low</option>
@@ -831,6 +853,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const input = document.createElement('input');
         input.type = 'datetime-local';
         input.classList.add(className);
+        input.classList.add('bulk-edit');
 
         if (dateValue && dateValue !== '0001-01-01T00:00:00Z') {
             input.value = utcToDatetimeLocal(dateValue);
@@ -940,6 +963,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
+            cell.classList.add('bulk-edit');
             attachProgressEditor(cell);
         });
     }
@@ -1105,6 +1129,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
+            cell.classList.add('bulk-edit');
             attachAssigneesEditor(cell);
         });
     }
@@ -1123,22 +1148,22 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             )
                 return;
 
-            closeExistingMenu();
-            openMenuForCell(cell);
+            closeExistingAssigneesMenu();
+            openAssignessMenuForCell(cell);
         });
     }
 
     /**
      * Close any currently opened assignees menu.
      */
-    function closeExistingMenu() {
+    function closeExistingAssigneesMenu() {
         document.querySelector('#assigneesMenu')?.remove();
     }
 
     /**
      * Open menu for a specific table cell.
      */
-    function openMenuForCell(cell: HTMLTableCellElement) {
+    function openAssignessMenuForCell(cell: HTMLTableCellElement) {
         cell.style.position = 'relative';
         const assigneesMenu = createAssigneesMenu();
         cell.appendChild(assigneesMenu);
@@ -1260,8 +1285,8 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         await refreshAssigneesList(cell, assigneesSelectedList);
 
-        setupSearchInput(input, assigneesMenu);
-        setupOutsideClickHandler(cell, assigneesMenu);
+        setupAssigneesSearchInput(input, assigneesMenu);
+        setupAssigneesOutsideClickHandler(cell, assigneesMenu);
     }
 
     /**
@@ -1449,7 +1474,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /**
      * Setup search input event with debounce.
      */
-    async function setupSearchInput(
+    async function setupAssigneesSearchInput(
         input: HTMLInputElement | null,
         assigneesMenu: HTMLDivElement
     ) {
@@ -1514,6 +1539,10 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         container: HTMLDivElement,
         assignees: Assignee[]
     ) {
+        const avatarPromises = assignees.map((assignee) =>
+            fetchAvatar(assignee.username)
+        );
+        await Promise.all(avatarPromises);
         container.innerHTML = '';
         for (const assignee of assignees) {
             const avatar = await fetchAvatar(assignee.username);
@@ -1549,7 +1578,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
           ${assignee.name || assignee.username}
         </span>
       </div>
-      <span style="font-size:12px; color:#888;">Enter or click</span>
+      <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
     `;
 
         btn.addEventListener('click', () => {
@@ -1607,7 +1636,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /**
      * Close the menu when clicking outside.
      */
-    function setupOutsideClickHandler(
+    function setupAssigneesOutsideClickHandler(
         cell: HTMLTableCellElement,
         assigneesMenu: HTMLDivElement
     ) {
@@ -1616,7 +1645,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 !cell.contains(e.target as Node) &&
                 document.contains(e.target as Node)
             ) {
-                assigneesMenu.remove();
+                assigneesMenu?.remove();
                 document.removeEventListener('click', clickOutside);
                 refreshAssignessColumn();
             }
@@ -1631,7 +1660,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         if (colIndex === -1) return;
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
-            `table td:nth-child(${colIndex + 1})`
+            `table td:nth-child(${colIndex + 1}):not(:has(#assigneesMenu))`
         );
 
         for (const cell of cells) {
@@ -1668,16 +1697,431 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         }
     }
 
+    function enhanceLabelsColumn() {
+        const colIndex = getCheckedColumnIndex(LABELS);
+        if (colIndex === -1) return;
+
+        const cells = document.querySelectorAll<HTMLTableCellElement>(
+            `table td:nth-child(${colIndex + 1})`
+        );
+
+        cells.forEach((cell) => {
+            cell.style.cursor = 'pointer';
+            cell.classList.add('bulk-edit');
+            attachLabelsEditor(cell);
+        });
+    }
+
+    function attachLabelsEditor(cell: HTMLTableCellElement) {
+        cell.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement | null;
+
+            // Prevent reopening when clicking inside the menu
+            if (
+                (target && target.closest('#labelsMenu')) ||
+                !document.contains(target)
+            )
+                return;
+
+            closeExistingLabelsMenu();
+            openLabelsMenuForCell(cell);
+        });
+    }
+
+    /**
+     * Open menu for a specific table cell.
+     */
+    function openLabelsMenuForCell(cell: HTMLTableCellElement) {
+        cell.style.position = 'relative';
+        const assigneesMenu = createLabelsMenu();
+        cell.appendChild(assigneesMenu);
+
+        openLabelsMenu(cell, assigneesMenu);
+    }
+
+    async function openLabelsMenu(
+        cell: HTMLTableCellElement,
+        labelsMenu: HTMLDivElement
+    ) {
+        labelsMenu.style.display = 'block';
+
+        const input = labelsMenu.querySelector<HTMLInputElement>('.input');
+        const labelsSelectedList = labelsMenu.querySelector<HTMLDivElement>(
+            '#labelsSelectedList'
+        );
+        if (!labelsSelectedList) return;
+
+        await refreshLabelsList(cell, labelsSelectedList);
+
+        setupLabelsSearchInput(input, labelsMenu);
+        setupLabelsOutsideClickHandler(cell, labelsMenu);
+    }
+
+    function setupLabelsOutsideClickHandler(
+        cell: HTMLTableCellElement,
+        labelsMenu: HTMLDivElement
+    ) {
+        document.addEventListener('click', function clickOutside(e) {
+            if (
+                !cell.contains(e.target as Node) &&
+                document.contains(e.target as Node)
+            ) {
+                labelsMenu?.remove();
+                document.removeEventListener('click', clickOutside);
+                refreshLabelsColumn();
+            }
+        });
+    }
+
+    async function refreshLabelsColumn() {
+        const colIndex = getCheckedColumnIndex(LABELS);
+        if (colIndex === -1) return;
+
+        const cells = document.querySelectorAll<HTMLTableCellElement>(
+            `table td:nth-child(${colIndex + 1}):not(:has(#labelsMenu))`
+        );
+
+        for (const cell of cells) {
+            cell.innerHTML = '';
+            const task = await fetchTaskById(getTaskIdFromElement(cell));
+            const labels = task.labels;
+            if (!labels) continue;
+
+            const labelWrapper = document.createElement('div');
+            labelWrapper.className = 'label-wrapper';
+
+            // ใช้ for...of สร้าง tag แต่ละอัน
+            for (const label of labels) {
+                const tag = document.createElement('span');
+                tag.className = 'tag';
+                tag.style.backgroundColor = '#' + label.hex_color;
+                tag.style.color = colorIsDark(label.hex_color) ? DARK : LIGHT;
+
+                const spanText = document.createElement('span');
+                spanText.textContent = label.title;
+
+                tag.appendChild(spanText);
+                labelWrapper.appendChild(tag);
+            }
+
+            cell.appendChild(labelWrapper);
+        }
+    }
+
+    async function setupLabelsSearchInput(
+        input: HTMLInputElement | null,
+        assigneesMenu: HTMLDivElement
+    ) {
+        if (!input) return;
+        input.focus();
+
+        const debouncedSearch = debounce(
+            () => handleLabelSearch(input, assigneesMenu),
+            300
+        );
+
+        input.addEventListener('input', debouncedSearch);
+
+        // Trigger an initial search
+        handleLabelSearch(input, assigneesMenu);
+    }
+
+    function handleLabelSearch(input: HTMLInputElement, menu: HTMLDivElement) {
+        const query = input.value.trim();
+        const searchResults =
+            menu.querySelector<HTMLDivElement>('.search-results');
+        if (!searchResults) return;
+
+        const cacheKey = query;
+
+        // ✅ Use cache if available
+        if (assigneeSearchCache.has(cacheKey)) {
+            renderLabels(searchResults, labelSearchCache.get(cacheKey)!);
+            if (
+                !labelSearchCache
+                    .get(cacheKey)
+                    ?.some(
+                        (label: Label) => label.title.trim() === query.trim()
+                    )
+            ) {
+                // TODO: Add new label
+                // const newLabel: Label = {
+                //     hex_color: '',
+                //     id: 0,
+                //     title: query.trim()
+                // } as Label;
+                // const btn = createLabelSearchButton(newLabel);
+                // searchResults.appendChild(btn);
+                updateAndRefreshAssignees();
+            }
+            return;
+        }
+
+        // Otherwise fetch from API
+        GM_xmlhttpRequest({
+            url: `/api/v1/labels?s=${encodeURIComponent(query)}`,
+            method: 'GET',
+            headers: { Authorization: `Bearer ${getJwtToken()}` },
+            responseType: 'json',
+            onload: async (response) => {
+                const labels = (response.response as Label[]) ?? [];
+
+                // ✅ Save result in cache
+                labelSearchCache.set(cacheKey, labels);
+                renderLabels(searchResults, labels);
+                // TODO: Add new label
+                // const newLabel: Label = {
+                //     hex_color: '',
+                //     id: 0,
+                //     title: query.trim()
+                // } as Label;
+                // const btn = createLabelSearchButton(newLabel);
+                // searchResults.appendChild(btn);
+            }
+        });
+    }
+
+    async function renderLabels(container: HTMLDivElement, labels: Label[]) {
+        container.innerHTML = '';
+        for (const label of labels) {
+            const btn = createLabelSearchButton(label);
+            container.appendChild(btn);
+        }
+        updateAndRefreshLabels();
+    }
+
+    function createLabelSearchButton(label: Label): HTMLButtonElement {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.labelId = label.id.toString();
+        Object.assign(btn.style, {
+            width: '100%',
+            border: 'none',
+            background: 'transparent',
+            padding: '6px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+        });
+        const color = colorIsDark(label.hex_color) ? DARK : LIGHT;
+
+        btn.innerHTML = `
+      <span>
+        <span  class="tag search-result" style="background-color: #${label.hex_color}; color: ${color}">
+            <span>${label.title}</span>
+        </span>
+       </span>
+      <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
+    `;
+
+        btn.addEventListener('click', () => {
+            const rows =
+                document.querySelectorAll<HTMLTableRowElement>(
+                    'tr.bulk-selected'
+                );
+            for (const row of rows) {
+                const taskId = getTaskIdFromElement(row);
+                taskCache[taskId].labels ??= [];
+                GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: `/api/v1/tasks/${taskId}/labels`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({ label_id: label.id })
+                });
+                if (taskCache[taskId].labels!.find((a) => a.id === label.id))
+                    return;
+                taskCache[taskId].labels!.push(label);
+            }
+            btn.style.display = 'none';
+            updateAndRefreshLabels();
+        });
+
+        return btn;
+    }
+
+    async function refreshLabelsList(
+        cell: HTMLTableCellElement,
+        labelsSelectedList: HTMLDivElement
+    ) {
+        labelsSelectedList.innerHTML = '';
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+
+        if (task?.labels) {
+            for (const label of task.labels ?? []) {
+                labelsSelectedList.appendChild(await createLabelItem(label));
+            }
+        }
+    }
+
+    /**
+     * Create a selected assignee item with avatar and remove button.
+     */
+    async function createLabelItem(label: Label): Promise<HTMLSpanElement> {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.style.backgroundColor = `#${label.hex_color}`;
+        tag.style.color = colorIsDark(label.hex_color) ? DARK : LIGHT;
+
+        // สร้าง span สำหรับข้อความ
+        const labelEl = document.createElement('span');
+        labelEl.textContent = label.title;
+
+        // สร้างปุ่มลบ
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className =
+            'base-button base-button--type-button delete is-small';
+
+        // ประกอบทั้งหมด
+        tag.appendChild(labelEl);
+        tag.appendChild(deleteButton);
+
+        deleteButton.addEventListener('click', async () => {
+            const rows = document.querySelectorAll<HTMLTableRowElement>(
+                'tbody tr.bulk-selected'
+            );
+            for (const row of rows) {
+                const taskId = getTaskIdFromElement(row);
+                GM_xmlhttpRequest({
+                    method: 'DELETE',
+                    url: `/api/v1/tasks/${taskId}/labels/${label.id}`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`
+                    }
+                });
+                taskCache[taskId].labels ??= [];
+                taskCache[taskId].labels = taskCache[taskId].labels!.filter(
+                    (l) => l.id !== label.id
+                );
+            }
+            updateAndRefreshLabels();
+        });
+
+        return tag;
+    }
+    async function updateAndRefreshLabels() {
+        const labelsMenu =
+            document.querySelector<HTMLDivElement>('#labelsMenu');
+        if (!labelsMenu) return;
+
+        const cell = labelsMenu.closest('td');
+        if (!cell) return;
+
+        const labelsSelectedList = document.querySelector<HTMLDivElement>(
+            '#labelsSelectedList'
+        );
+        if (!labelsSelectedList) return;
+
+        await refreshLabelsList(cell, labelsSelectedList);
+        await updateLabelsSearchResults(labelsMenu, cell);
+    }
+
+    async function updateLabelsSearchResults(
+        labelsMenu: HTMLDivElement,
+        cell: HTMLTableCellElement
+    ) {
+        const buttons = labelsMenu.querySelectorAll<HTMLButtonElement>(
+            '.search-results button'
+        );
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+        const taskLabels = task?.labels || [];
+
+        buttons.forEach((btn) => {
+            const labelId = parseInt(btn.dataset.labelId!);
+            btn.style.display = taskLabels.some((a) => a.id === labelId)
+                ? 'none'
+                : 'flex';
+        });
+    }
+
+    /**
+     * Create the base DOM structure for the assignees menu.
+     */
+    function createLabelsMenu(): HTMLDivElement {
+        const menu = document.createElement('div');
+        menu.id = 'labelsMenu';
+        menu.className = 'multiselect';
+        menu.tabIndex = -1;
+
+        Object.assign(menu.style, {
+            position: 'absolute',
+            display: 'none',
+            background: 'var(--scheme-main)',
+            border: '1px solid #ccc',
+            width: '250px',
+            zIndex: 10000,
+            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+            cursor: 'default',
+            top: '0',
+            left: '0'
+        });
+
+        // Selected assignees list
+        const selectedList = document.createElement('div');
+        selectedList.className = 'selected-list';
+        selectedList.id = 'labelsSelectedList';
+        Object.assign(selectedList.style, {
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '6px'
+        });
+
+        // Input wrapper
+        const control = document.createElement('div');
+        control.className = 'control';
+        Object.assign(control.style, {
+            padding: '5px',
+            borderBottom: '1px solid #ccc',
+            borderTop: '1px solid #ccc'
+        });
+
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'input-wrapper';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'input';
+        input.placeholder = 'Type to assign…';
+        Object.assign(input.style, {
+            width: '100%',
+            border: 'none',
+            outline: 'none',
+            background: 'transparent'
+        });
+
+        inputWrapper.appendChild(input);
+        control.appendChild(inputWrapper);
+
+        // Search results container
+        const searchResults = document.createElement('div');
+        searchResults.className = 'search-results';
+
+        menu.appendChild(selectedList);
+        menu.appendChild(control);
+        menu.appendChild(searchResults);
+
+        return menu;
+    }
+
+    function closeExistingLabelsMenu() {
+        document.querySelector('#labelsMenu')?.remove();
+    }
+
     GM_addStyle(`
         .edit-title {
             border: none;
             background: transparent;
             color: transparent;
             transform: rotate(90deg);
-            display: none;
+            pointer-events: none;
         }
         tbody tr:hover .editable-span.hidden + .edit-title {
-            display: inline-block;
+            pointer-events: all;
             color: rgba(235, 233, 229, 0.9);
             cursor: pointer;
         }
@@ -1706,10 +2150,14 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const rows = Array.from(tbody.querySelectorAll('tr'));
 
         if (
-            e.target instanceof HTMLInputElement ||
-            e.target instanceof HTMLSelectElement
-        )
+            (e.target as HTMLElement)
+                .closest('.bulk-edit')
+                ?.closest('.bulk-selected')
+        ) {
             return;
+        } else if (!(e.target as HTMLElement).closest('.bulk-edit')) {
+            e.preventDefault();
+        }
 
         const lastClicked =
             tbody.querySelector<HTMLTableRowElement>('tr.last-clicked');
@@ -1732,8 +2180,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         // Update last-clicked
         rows.forEach((r) => r.classList.remove('last-clicked'));
         tr.classList.add('last-clicked');
-
-        e.preventDefault();
     });
 
     // --- Drag & Drop ---
@@ -1813,6 +2259,13 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             enhanceEndDateColumn();
             enhanceProgressColumn();
             enhanceAssigneesColumn();
+            enhanceLabelsColumn();
+            const hasHorizontalOverflow = document
+                .querySelector('table')
+                ?.closest<HTMLElement>('.has-horizontal-overflow');
+            if (hasHorizontalOverflow) {
+                hasHorizontalOverflow.style.overflow = 'visible';
+            }
 
             // --- Update draggable ตาม bulk-selected ---
             const observer = new MutationObserver(() => {
