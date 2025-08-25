@@ -123,7 +123,7 @@
         const titleIndex = getCheckedColumnIndex(TITLE);
         if (titleIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${titleIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${titleIndex + 1}):not(.enhanced)`);
         cells.forEach(initEditableCell);
     }
     /**
@@ -132,6 +132,7 @@
      */
     function initEditableCell(td) {
         td.style.cursor = 'pointer';
+        td.classList.add('enhanced');
         const link = td.querySelector('a');
         if (!link)
             return;
@@ -283,13 +284,14 @@
         const doneIndex = getCheckedColumnIndex(DONE);
         if (doneIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${doneIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${doneIndex + 1}):not(.enhanced)`);
         cells.forEach(setupDoneCell);
     }
     /**
      * Setup a single "Done" cell with checkbox + label.
      */
     function setupDoneCell(cell) {
+        cell.classList.add('enhanced');
         const hasDoneElement = Boolean(cell.querySelector('.is-done--small'));
         cell.innerHTML = buildDoneCellHTML(hasDoneElement);
         const doneElement = cell.querySelector('.is-done--small');
@@ -456,6 +458,9 @@
     function setupPriorityCell(row, taskData, priorityIndex) {
         const taskId = getTaskIdByTr(row);
         const td = row.children[priorityIndex];
+        if (td.classList.contains('enhanced'))
+            return;
+        td.classList.add('enhanced');
         const wrapper = document.createElement('div');
         wrapper.classList.add('select');
         const select = createPrioritySelect();
@@ -501,28 +506,8 @@
             if (!tbody)
                 return;
             const priority = +select.value;
-            if (row.classList.contains('bulk-selected')) {
-                updateBulkRowsPriority(tbody, priority);
-            }
-            else {
-                updateSingleRowPriority(row, priority);
-            }
+            updateBulkRowsPriority(tbody, priority);
             updateSelectStyle(select, priority);
-        });
-    }
-    /**
-     * Update a single row's priority via API.
-     */
-    function updateSingleRowPriority(row, priority) {
-        const taskId = getTaskIdByTr(row);
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `/api/v1/tasks/${taskId}`,
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ priority })
         });
     }
     /**
@@ -570,7 +555,7 @@
         const colIndex = getCheckedColumnIndex(columnKey);
         if (colIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
         const taskData = await fetchTasksByIds(getTaskIdsFromTable());
         cells.forEach((cell) => setupDateCell(cell, taskData, className, dateField));
     }
@@ -578,6 +563,7 @@
      * Setup a single date cell with input element and change handler.
      */
     function setupDateCell(cell, taskData, className, dateField) {
+        cell.classList.add('enhanced');
         const taskId = getTaskIdFromElement(cell);
         const dateValue = taskData.find((task) => task.id === taskId)?.[dateField];
         const input = document.createElement('input');
@@ -654,10 +640,11 @@
         const colIndex = getCheckedColumnIndex(PROGRESS);
         if (colIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
             cell.classList.add('bulk-edit');
+            cell.classList.add('enhanced');
             attachProgressEditor(cell);
         });
     }
@@ -701,35 +688,22 @@
         return !isNaN(progress) && progress >= 0 && progress <= 100;
     }
     /**
-     * Send API request to update progress for a single task.
-     */
-    function updateTaskProgress(taskId, newProgress) {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `/api/v1/tasks/${taskId}`,
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ progress: newProgress })
-        });
-    }
-    /**
      * Send API request to update progress for multiple tasks (bulk).
      */
     function updateBulkTaskProgress(taskIds, newProgress) {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `/api/v1/tasks/bulk`,
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({
-                progress: newProgress,
-                task_ids: taskIds
-            })
-        });
+        for (const taskId of taskIds) {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/${taskId}`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({
+                    percent_done: newProgress / 100
+                })
+            });
+        }
     }
     /**
      * Update the UI for bulk-selected rows after saving.
@@ -752,23 +726,16 @@
          * Save the progress value to the API and update the cell text.
          */
         const saveProgress = () => {
-            const newProgress = parseInt(input.value);
+            const newProgress = Math.round(parseInt(input.value) / 10) * 10;
             if (isValidProgress(newProgress)) {
                 const tr = cell.closest('tr');
                 const taskId = getTaskIdFromElement(cell);
-                if (tr?.classList.contains('bulk-selected')) {
-                    // Collect all bulk-selected task IDs
-                    const taskIds = Array.from(document.querySelectorAll('tbody tr.bulk-selected')).map(getTaskIdByTr);
-                    // Bulk update API request
-                    updateBulkTaskProgress(taskIds, newProgress);
-                    // Update UI for all bulk-selected rows
-                    updateBulkProgressUI(newProgress);
-                }
-                else {
-                    // Single task update
-                    updateTaskProgress(taskId, newProgress);
-                    cell.innerText = `${newProgress}%`;
-                }
+                // Collect all bulk-selected task IDs
+                const taskIds = Array.from(document.querySelectorAll('tbody tr.bulk-selected')).map(getTaskIdByTr);
+                // Bulk update API request
+                updateBulkTaskProgress(taskIds, newProgress);
+                // Update UI for all bulk-selected rows
+                updateBulkProgressUI(newProgress);
             }
             else {
                 // Revert to original value if invalid
@@ -792,10 +759,11 @@
         const colIndex = getCheckedColumnIndex(ASSIGNEES);
         if (colIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
             cell.classList.add('bulk-edit');
+            cell.classList.add('enhanced');
             attachAssigneesEditor(cell);
         });
     }
@@ -945,6 +913,8 @@
         img.height = 30;
         img.width = 30;
         img.className = 'avatar v-popper--has-tooltip';
+        img.style.borderRadius = '100%';
+        img.style.verticalAlign = 'middle';
         img.src = await fetchAvatar(assignee.username);
         img.title = assignee.name || assignee.username;
         const button = document.createElement('button');
@@ -1126,7 +1096,6 @@
         Object.assign(btn.style, {
             width: '100%',
             border: 'none',
-            background: 'transparent',
             padding: '6px',
             textAlign: 'left',
             cursor: 'pointer',
@@ -1134,37 +1103,44 @@
             alignItems: 'center',
             justifyContent: 'space-between'
         });
-        btn.innerHTML = `
-      <div style="display:flex; align-items:center; gap:6px;">
-        <img class="avatar" src="${avatar}" height="30" width="30" />
-        <span style="color: var(--input-color);">
-          ${assignee.name || assignee.username}
-        </span>
-      </div>
-      <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
-    `;
+        const wrapper = document.createElement('div');
+        Object.assign(wrapper.style, {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+        });
+        // avatar
+        const img = document.createElement('img');
+        img.className = 'avatar';
+        img.src = avatar;
+        img.width = 30;
+        img.height = 30;
+        Object.assign(img.style, {
+            borderRadius: '100%',
+            verticalAlign: 'middle'
+        });
+        // ชื่อ
+        const nameSpan = document.createElement('span');
+        nameSpan.style.color = 'var(--input-color)';
+        nameSpan.textContent = assignee.name || assignee.username;
+        // hint text
+        const hintSpan = document.createElement('span');
+        hintSpan.className = 'hidden';
+        hintSpan.textContent = 'Enter or click';
+        Object.assign(hintSpan.style, {
+            fontSize: '12px',
+            color: '#888'
+        });
+        // ประกอบ element
+        wrapper.appendChild(img);
+        wrapper.appendChild(nameSpan);
+        btn.appendChild(wrapper);
+        btn.appendChild(hintSpan);
         btn.addEventListener('click', () => {
-            if (btn.closest('tr')?.classList.contains('bulk-selected')) {
-                const rows = document.querySelectorAll('tr.bulk-selected');
-                for (const row of rows) {
-                    const taskId = getTaskIdFromElement(row);
-                    taskCache[taskId].assignees ??= [];
-                    GM_xmlhttpRequest({
-                        method: 'PUT',
-                        url: `/api/v1/tasks/${taskId}/assignees`,
-                        headers: {
-                            Authorization: `Bearer ${getJwtToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        data: JSON.stringify({ user_id: assignee.id })
-                    });
-                    if (taskCache[taskId].assignees.find((a) => a.id === assignee.id))
-                        return;
-                    taskCache[taskId].assignees.push(assignee);
-                }
-            }
-            else {
-                const taskId = getTaskIdFromElement(btn);
+            const rows = document.querySelectorAll('tr.bulk-selected');
+            for (const row of rows) {
+                const taskId = getTaskIdFromElement(row);
+                taskCache[taskId].assignees ??= [];
                 GM_xmlhttpRequest({
                     method: 'PUT',
                     url: `/api/v1/tasks/${taskId}/assignees`,
@@ -1174,9 +1150,9 @@
                     },
                     data: JSON.stringify({ user_id: assignee.id })
                 });
-                taskCache[taskId].assignees ??= [];
                 if (taskCache[taskId].assignees.find((a) => a.id === assignee.id))
                     return;
+                taskCache[taskId].assignees.push(assignee);
             }
             btn.style.display = 'none';
             updateAndRefreshAssignees();
@@ -1237,10 +1213,11 @@
         const colIndex = getCheckedColumnIndex(LABELS);
         if (colIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1})`);
+        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
             cell.classList.add('bulk-edit');
+            cell.classList.add('enhanced');
             attachLabelsEditor(cell);
         });
     }
@@ -1332,15 +1309,7 @@
             if (!labelSearchCache
                 .get(cacheKey)
                 ?.some((label) => label.title.trim() === query.trim())) {
-                // TODO: Add new label
-                // const newLabel: Label = {
-                //     hex_color: '',
-                //     id: 0,
-                //     title: query.trim()
-                // } as Label;
-                // const btn = createLabelSearchButton(newLabel);
-                // searchResults.appendChild(btn);
-                updateAndRefreshAssignees();
+                updateAndRefreshLabels();
             }
             return;
         }
@@ -1355,14 +1324,6 @@
                 // ✅ Save result in cache
                 labelSearchCache.set(cacheKey, labels);
                 renderLabels(searchResults, labels);
-                // TODO: Add new label
-                // const newLabel: Label = {
-                //     hex_color: '',
-                //     id: 0,
-                //     title: query.trim()
-                // } as Label;
-                // const btn = createLabelSearchButton(newLabel);
-                // searchResults.appendChild(btn);
             }
         });
     }
@@ -1381,7 +1342,6 @@
         Object.assign(btn.style, {
             width: '100%',
             border: 'none',
-            background: 'transparent',
             padding: '6px',
             textAlign: 'left',
             cursor: 'pointer',
@@ -1578,6 +1538,15 @@
         .hidden {
             display: none;
         }
+        .search-results button {
+            background-color: transparent;
+        }
+        .search-results button:hover {
+            background-color: var(--table-row-hover-background-color);
+        }
+        tbody tr td:first-child {
+            padding-left: calc(20px * var(--level));
+        }
     `);
     let draggedRows = [];
     let lastDragOverTr = null;
@@ -1664,50 +1633,161 @@
         // ถ้า targetTr อยู่ใน selection bulk-selected ของตัวเอง → ไม่ทำอะไร
         if (targetTr.classList.contains('bulk-selected'))
             return;
-        draggedRows.forEach((row) => {
-            tbody.insertBefore(row, targetTr);
+        draggedRows
+            .slice()
+            .reverse()
+            .forEach((row) => {
+            tbody.insertBefore(row, targetTr.nextElementSibling);
         });
     });
-    // Create observer
-    const observer = new MutationObserver((mutationsList, obs) => {
-        if (!document.querySelector('table tbody tr td'))
-            return;
-        setTimeout(() => {
-            enhanceEditableTitles();
-            enhanceDoneColumn();
-            enhancePriorityColumn();
-            enhanceDueDateColumn();
-            enhanceStartDateColumn();
-            enhanceEndDateColumn();
-            enhanceProgressColumn();
-            enhanceAssigneesColumn();
-            enhanceLabelsColumn();
-            const hasHorizontalOverflow = document
-                .querySelector('table')
-                ?.closest('.has-horizontal-overflow');
-            if (hasHorizontalOverflow) {
-                hasHorizontalOverflow.style.overflow = 'visible';
+    /**
+     * Initialize a MutationObserver to watch for class changes on <tr> elements.
+     * Specifically toggles the "draggable" attribute when the "bulk-selected" class changes.
+     */
+    function initRowSelectionObserver() {
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (!isClassAttributeChange(mutation))
+                    continue;
+                const target = mutation.target;
+                if (!(target instanceof HTMLTableRowElement))
+                    continue;
+                handleRowClassChange(target, mutation.oldValue);
             }
-            // --- Update draggable ตาม bulk-selected ---
-            const observer = new MutationObserver(() => {
-                document
-                    .querySelectorAll('tbody tr.bulk-selected')
-                    .forEach((tr) => tr.setAttribute('draggable', 'true'));
-                document
-                    .querySelectorAll('tbody tr:not(.bulk-selected)')
-                    .forEach((tr) => tr.removeAttribute('draggable'));
-            });
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['class']
-            });
-            obs.disconnect();
+        });
+        observer.observe(document.body, {
+            subtree: true,
+            attributes: true,
+            attributeOldValue: true,
+            attributeFilter: ['class']
+        });
+    }
+    /**
+     * Check if the mutation is a class attribute change.
+     */
+    function isClassAttributeChange(mutation) {
+        return (mutation.type === 'attributes' && mutation.attributeName === 'class');
+    }
+    /**
+     * Handle changes to a row's class attribute.
+     * Toggles the draggable attribute based on whether "bulk-selected" is added or removed.
+     */
+    function handleRowClassChange(row, oldClassValue) {
+        const hasClass = row.classList.contains('bulk-selected');
+        const hadClass = oldClassValue?.includes('bulk-selected') ?? false;
+        // Apply changes only if there is a real difference
+        if (hasClass !== hadClass) {
+            if (hasClass) {
+                row.setAttribute('draggable', 'true');
+            }
+            else {
+                row.removeAttribute('draggable');
+            }
+        }
+    }
+    async function getTaskLevelById(taskId) {
+        let level = 0;
+        let currentTaskId = taskId;
+        while (1) {
+            const task = await fetchTaskById(currentTaskId);
+            if (!task.related_tasks?.parenttask?.length)
+                break;
+            currentTaskId = task.related_tasks.parenttask[0].id;
+            level++;
+        }
+        return level;
+    }
+    // Observer configuration
+    const observerConfig = { attributes: true, childList: true, subtree: true };
+    let href = null;
+    let theadHtml = null;
+    /**
+     * Clear the task cache
+     */
+    function clearTaskCache() {
+        for (const key in taskCache) {
+            delete taskCache[key];
+        }
+    }
+    /**
+     * Sort rows by task level and insert them in hierarchical order
+     */
+    async function reorderTaskRows(rows) {
+        const sortRows = (await Promise.all(Array.from(rows).map(async (row) => {
+            const task = await fetchTaskById(getTaskIdByTr(row));
+            const level = await getTaskLevelById(task.id);
+            return { row, level };
+        }))).sort((a, b) => a.level - b.level);
+        for (const row of sortRows) {
+            if (row.level !== 0) {
+                const task = await fetchTaskById(getTaskIdByTr(row.row));
+                const parentRow = Array.from(rows).find((r) => {
+                    const id = getTaskIdByTr(r);
+                    return id === task.related_tasks.parenttask[0].id;
+                });
+                if (parentRow) {
+                    parentRow.insertAdjacentElement('afterend', row.row);
+                }
+            }
+            row.row.style.setProperty('--level', row.level.toString());
+        }
+    }
+    /**
+     * Enhance table columns with custom features
+     */
+    function enhanceTableColumns() {
+        enhanceEditableTitles();
+        enhanceDoneColumn();
+        enhancePriorityColumn();
+        enhanceDueDateColumn();
+        enhanceStartDateColumn();
+        enhanceEndDateColumn();
+        enhanceProgressColumn();
+        enhanceAssigneesColumn();
+        enhanceLabelsColumn();
+    }
+    /**
+     * Ensure horizontal overflow is visible for the table
+     */
+    function fixHorizontalOverflow() {
+        const hasHorizontalOverflow = document
+            .querySelector('table')
+            ?.closest('.has-horizontal-overflow');
+        if (hasHorizontalOverflow) {
+            hasHorizontalOverflow.style.overflow = 'visible';
+        }
+    }
+    /**
+     * Handle detected DOM changes
+     */
+    async function handleDomChanges(observer) {
+        if (!document.querySelector('table tbody tr td')) {
+            return; // No table detected
+        }
+        observer.disconnect();
+        setTimeout(async () => {
+            const currentHref = window.location.href;
+            const currentTheadHtml = document.querySelector('thead')?.outerHTML ?? null;
+            // Only proceed if table header or URL has changed
+            if (href !== currentHref || theadHtml !== currentTheadHtml) {
+                clearTaskCache();
+                await fetchTasksByIds(getTaskIdsFromTable());
+                const rows = document.querySelectorAll('tbody tr');
+                await reorderTaskRows(rows);
+                // Save state for change detection
+                href = currentHref;
+                theadHtml = currentTheadHtml;
+            }
+            enhanceTableColumns();
+            fixHorizontalOverflow();
+            // Resume observing
+            observer.observe(document.body, observerConfig);
         }, 100);
+    }
+    // Create and start observer
+    const observer = new MutationObserver((mutations, obs) => {
+        handleDomChanges(obs);
     });
-    // Configure what to observe
-    const config = { attributes: true, childList: true, subtree: true };
-    // Start observing
-    observer.observe(document.body, config);
+    observer.observe(document.body, observerConfig);
+    initRowSelectionObserver();
 })();
