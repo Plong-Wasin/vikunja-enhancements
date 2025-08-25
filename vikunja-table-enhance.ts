@@ -369,12 +369,12 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     }
 
     /**
-     * Determines if given hex color string is dark, for contrast calculation.
+     * Determines if given hex color string is light, for contrast calculation.
      * Uses an approximation of WCAG APCA formula.
      * @param color Color string e.g. '#ff0000' or 'ff0000'
-     * @returns True if color is dark, false otherwise
+     * @returns True if color is light, false otherwise
      */
-    function isColorDark(color: string | undefined): boolean {
+    function isColorLight(color: string | undefined): boolean {
         if (!color || color === '#') return true;
 
         if (color[0] !== '#') color = '#' + color;
@@ -1924,7 +1924,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 const labelTag = document.createElement('span');
                 labelTag.className = 'tag';
                 labelTag.style.backgroundColor = '#' + label.hex_color;
-                labelTag.style.color = isColorDark(label.hex_color)
+                labelTag.style.color = isColorLight(label.hex_color)
                     ? COLOR_DARK
                     : COLOR_LIGHT;
 
@@ -2036,7 +2036,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             justifyContent: 'space-between'
         });
 
-        const color = isColorDark(label.hex_color) ? COLOR_DARK : COLOR_LIGHT;
+        const color = isColorLight(label.hex_color) ? COLOR_DARK : COLOR_LIGHT;
 
         button.innerHTML = `
             <span>
@@ -2153,7 +2153,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const tag = document.createElement('span');
         tag.className = 'tag';
         tag.style.backgroundColor = `#${label.hex_color}`;
-        tag.style.color = isColorDark(label.hex_color)
+        tag.style.color = isColorLight(label.hex_color)
             ? COLOR_DARK
             : COLOR_LIGHT;
 

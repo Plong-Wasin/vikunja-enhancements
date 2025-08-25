@@ -208,12 +208,12 @@
         editSpan.addEventListener('blur', () => saveTitleEdit(link, editSpan));
     }
     /**
-     * Determines if given hex color string is dark, for contrast calculation.
+     * Determines if given hex color string is light, for contrast calculation.
      * Uses an approximation of WCAG APCA formula.
      * @param color Color string e.g. '#ff0000' or 'ff0000'
-     * @returns True if color is dark, false otherwise
+     * @returns True if color is light, false otherwise
      */
-    function isColorDark(color) {
+    function isColorLight(color) {
         if (!color || color === '#')
             return true;
         if (color[0] !== '#')
@@ -1377,7 +1377,7 @@
                 const labelTag = document.createElement('span');
                 labelTag.className = 'tag';
                 labelTag.style.backgroundColor = '#' + label.hex_color;
-                labelTag.style.color = isColorDark(label.hex_color)
+                labelTag.style.color = isColorLight(label.hex_color)
                     ? COLOR_DARK
                     : COLOR_LIGHT;
                 const textSpan = document.createElement('span');
@@ -1460,7 +1460,7 @@
             alignItems: 'center',
             justifyContent: 'space-between'
         });
-        const color = isColorDark(label.hex_color) ? COLOR_DARK : COLOR_LIGHT;
+        const color = isColorLight(label.hex_color) ? COLOR_DARK : COLOR_LIGHT;
         button.innerHTML = `
             <span>
                 <span class="tag search-result" style="background-color: #${label.hex_color}; color: ${color}">
@@ -1548,7 +1548,7 @@
         const tag = document.createElement('span');
         tag.className = 'tag';
         tag.style.backgroundColor = `#${label.hex_color}`;
-        tag.style.color = isColorDark(label.hex_color)
+        tag.style.color = isColorLight(label.hex_color)
             ? COLOR_DARK
             : COLOR_LIGHT;
         const textSpan = document.createElement('span');
