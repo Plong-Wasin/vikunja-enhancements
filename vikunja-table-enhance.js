@@ -1,25 +1,22 @@
 "use strict";
 (function () {
     'use strict';
-    const IDENTIFY = 0; // สำหรับ "#" หรือไม่ระบุ
-    const DONE = 1; // "Done"
-    const TITLE = 2; // "Title"
-    const PRIORITY = 3; // "Priority" /
-    const LABELS = 4; // "Labels" /
-    const ASSIGNEES = 5; // "Assignees" /
-    const DUE_DATE = 6; // "Due Date" /
-    const START_DATE = 7; // "Start Date" /
-    const END_DATE = 8; // "End Date" /
-    const PROGRESS = 9; // "Progress" /
-    const DONE_AT = 10; // "Done At"
-    const CREATED = 11; // "Created"
-    const UPDATED = 12; // "Updated"
-    // ICON COLOR RGB 235,233,229
-    const CREATED_BY = 13; // "Created By"
-    const taskCache = {};
-    const avatarCache = {};
-    const assigneeSearchCache = new Map();
-    const labelSearchCache = new Map();
+    // Column indices for filtering and editing
+    const COLUMN_IDENTIFY = 0; // "#" or unspecified
+    const COLUMN_DONE = 1;
+    const COLUMN_TITLE = 2;
+    const COLUMN_PRIORITY = 3;
+    const COLUMN_LABELS = 4;
+    const COLUMN_ASSIGNEES = 5;
+    const COLUMN_DUE_DATE = 6;
+    const COLUMN_START_DATE = 7;
+    const COLUMN_END_DATE = 8;
+    const COLUMN_PROGRESS = 9;
+    const COLUMN_DONE_AT = 10;
+    const COLUMN_CREATED = 11;
+    const COLUMN_UPDATED = 12;
+    const COLUMN_CREATED_BY = 13;
+    // Colors for UI elements
     const COLORS = [
         '#ffbe0b',
         '#fd8a09',
@@ -35,58 +32,48 @@
         '#073b4c',
         '#373f47'
     ];
-    const LIGHT = 'hsl(220, 13%, 91%)'; // grey-200
-    const DARK = 'hsl(215, 27.9%, 16.9%)'; // grey-800
-    function getViewId() {
-        return +(window.location.pathname.split('/').pop() ?? 0);
-    }
+    const COLOR_LIGHT = 'hsl(220, 13%, 91%)'; // grey-200
+    const COLOR_DARK = 'hsl(215, 27.9%, 16.9%)'; // grey-800
+    // Cache for tasks and avatars to avoid repeated API calls
+    const taskCache = {};
+    const avatarCache = {};
+    const assigneeSearchCache = new Map();
+    const labelSearchCache = new Map();
+    /** Returns the current project ID from the URL */
     function getProjectId() {
         const pathParts = window.location.pathname.split('/');
         const projectId = pathParts[2];
         return +projectId;
     }
+    /** Retrieves the JWT token from localStorage */
     function getJwtToken() {
         return localStorage.getItem('token');
     }
-    function isTableView() {
-        return !!document.querySelector('.fa-table-cells');
-    }
+    /** Logs messages prefixed with [Vikunja] */
     function log(...args) {
         console.log('%c[Vikunja]', 'color: #ebd927', ...args);
     }
-    function ready(fn) {
-        if (document.readyState != 'loading') {
-            fn();
-        }
-        else {
-            document.addEventListener('DOMContentLoaded', fn);
-        }
-    }
-    async function sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-    }
     /**
-     * Collects the indices of all checked checkboxes inside `.columns-filter`.
-     *
-     * @returns An array of indices representing the positions of checked checkboxes.
+     * Collects indices of all checked checkboxes within '.columns-filter' UI element.
+     * Used to identify which columns are currently visible.
+     * @returns Array of indices of checked columns
      */
     function getCheckedColumnIndices() {
         const checkedIndices = [];
         document
             .querySelectorAll('.columns-filter input')
-            .forEach((input, index) => {
-            if (input.checked) {
-                checkedIndices.push(index);
-            }
+            .forEach((input, idx) => {
+            if (input.checked)
+                checkedIndices.push(idx);
         });
         return checkedIndices;
     }
     /**
-     * Extract the task ID from a table row element.
-     * @param tr - The table row containing the task link.
-     * @returns The task ID as a number, or 0 if not found.
+     * Extracts the task ID from a table row element.
+     * @param tr Table row element containing task link
+     * @returns Task ID number or 0 if not found
      */
-    function getTaskIdByTr(tr) {
+    function getTaskIdByRow(tr) {
         if (!tr)
             return 0;
         const link = tr.querySelector('a');
@@ -96,157 +83,161 @@
         return idStr ? Number(idStr) : 0;
     }
     /**
-     * Extract the task ID from any element inside the row.
-     * @param el - An element inside the table row.
-     * @returns The task ID as a number, or 0 if not found.
+     * Extracts the task ID from an element inside the row.
+     * @param element An element nested inside a table row
+     * @returns Task ID number or 0 if not found
      */
-    function getTaskIdFromElement(el) {
-        const tr = el.closest('tr');
-        return getTaskIdByTr(tr);
+    function getTaskIdFromElement(element) {
+        const row = element.closest('tr');
+        return getTaskIdByRow(row);
     }
-    function getDoneText() {
+    /** Returns the text for the "Done" column header */
+    function getDoneColumnText() {
         return (document.querySelectorAll('.columns-filter span')[2]?.textContent ?? '');
     }
     /**
-     * Returns the position of a checked column, or -1 if not checked.
-     *
-     * @param column - The column index to check.
-     * @returns The index of the checked column, or -1 if not checked.
+     * Finds the index of a checked column or returns -1 if it is not visible
+     * @param column Column index constant
+     * @returns Index of the checked column or -1 if not checked
      */
     function getCheckedColumnIndex(column) {
         return getCheckedColumnIndices().indexOf(column);
     }
+    //---------------- Editable Title Enhancement ----------------
     /**
-     * Entry point: Enhance editable titles in the table.
+     * Main function to enhance table title cells with editing capabilities.
+     * Adds inline editing UI and behaviour.
      */
     function enhanceEditableTitles() {
-        const titleIndex = getCheckedColumnIndex(TITLE);
-        if (titleIndex === -1)
+        const titleColIndex = getCheckedColumnIndex(COLUMN_TITLE);
+        if (titleColIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${titleIndex + 1}):not(.enhanced)`);
-        cells.forEach(initEditableCell);
+        const titleCells = document.querySelectorAll(`table td:nth-child(${titleColIndex + 1}):not(.enhanced)`);
+        titleCells.forEach(initEditableTitleCell);
     }
     /**
-     * Initialize editable behavior for a single table cell.
-     * @param td - The table cell element.
+     * Initializes a single title cell to support inline editing.
+     * @param cell Table cell element for task title
      */
-    function initEditableCell(td) {
-        td.style.cursor = 'pointer';
-        td.classList.add('enhanced');
-        const link = td.querySelector('a');
+    function initEditableTitleCell(cell) {
+        cell.style.cursor = 'pointer';
+        cell.classList.add('enhanced');
+        const link = cell.querySelector('a');
         if (!link)
             return;
-        const div = document.createElement('div');
-        td.appendChild(div);
-        styleCell(div);
-        div.appendChild(link);
-        const span = createEditableSpan();
-        div.appendChild(span);
-        const editBtn = createEditButton(link, span);
-        div.appendChild(editBtn);
-        div.addEventListener('dblclick', () => activateEditMode(link, span));
-        attachLinkEvents(link, span);
+        // Create container div with styles for layout
+        const container = document.createElement('div');
+        cell.appendChild(container);
+        applyFlexContainerStyle(container);
+        // Move link inside container
+        container.appendChild(link);
+        // Create hidden editable span for inline edit input
+        const editSpan = createEditableSpan();
+        container.appendChild(editSpan);
+        // Create edit button that activates edit mode
+        const editButton = createEditButton(link, editSpan);
+        container.appendChild(editButton);
+        // Double-click on container activates edit mode
+        container.addEventListener('dblclick', () => activateEditMode(link, editSpan));
+        attachEditSpanEventHandlers(link, editSpan);
     }
-    /**
-     * Apply layout styling to the table cell.
-     */
-    function styleCell(td) {
-        td.style.cssText = `
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    `;
+    /** Applies flexbox styling to a container element */
+    function applyFlexContainerStyle(container) {
+        container.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        `;
     }
-    /**
-     * Create an editable span (hidden by default).
-     */
+    /** Creates a hidden, contenteditable span for editing text */
     function createEditableSpan() {
         const span = document.createElement('span');
         span.contentEditable = 'true';
-        span.classList.add('hidden');
-        span.classList.add('editable-span');
+        span.classList.add('hidden', 'editable-span');
         return span;
     }
     /**
-     * Create the edit button for a link.
-     * @param link - The anchor element to edit.
-     * @param span - The editable span element.
+     * Creates an edit button (pencil icon) that initiates the editing mode
+     * @param link The original link element displaying the title
+     * @param editSpan The hidden editable span
+     * @returns The button element
      */
-    function createEditButton(link, span) {
-        const btn = document.createElement('button');
-        btn.innerHTML = '✎';
-        btn.className = 'edit-title';
-        btn.addEventListener('click', () => activateEditMode(link, span));
-        return btn;
+    function createEditButton(link, editSpan) {
+        const button = document.createElement('button');
+        button.innerHTML = '✎';
+        button.className = 'edit-title';
+        button.addEventListener('click', () => activateEditMode(link, editSpan));
+        return button;
     }
-    /**
-     * Switch link into editable mode.
-     */
-    function activateEditMode(link, span) {
-        span.textContent = link.textContent || '';
+    /** Activates editing mode for the title cell */
+    function activateEditMode(link, editSpan) {
+        editSpan.textContent = link.textContent || '';
         link.classList.add('hidden');
-        span.classList.remove('hidden');
-        focusCursorToEnd(span);
+        editSpan.classList.remove('hidden');
+        focusElementCursorToEnd(editSpan);
     }
-    /**
-     * Place cursor at the end of a contenteditable element.
-     */
-    function focusCursorToEnd(element) {
+    /** Sets focus and places the cursor at the end of a contenteditable element */
+    function focusElementCursorToEnd(element) {
         const range = document.createRange();
         range.selectNodeContents(element);
         range.collapse(false);
         const selection = window.getSelection();
-        if (selection) {
-            selection.removeAllRanges();
-            selection.addRange(range);
-        }
+        if (!selection)
+            return;
+        selection.removeAllRanges();
+        selection.addRange(range);
         element.focus();
     }
     /**
-     * Attach events for saving or canceling edits.
+     * Attaches handlers to the editable span for saving or canceling edits.
+     * Saves on Enter or blur, cancels on Escape.
+     * @param link The original link element
+     * @param editSpan The editable span
      */
-    function attachLinkEvents(link, span) {
-        span.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                span.blur();
-                saveChanges(link, span);
+    function attachEditSpanEventHandlers(link, editSpan) {
+        editSpan.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                editSpan.blur();
+                saveTitleEdit(link, editSpan);
             }
-            else if (e.key === 'Escape') {
-                cancelEdit(link, span);
+            else if (event.key === 'Escape') {
+                cancelTitleEdit(link, editSpan);
             }
         });
-        span.addEventListener('blur', () => saveChanges(link, span));
-    }
-    function colorIsDark(color) {
-        if (typeof color === 'undefined') {
-            return true; // Defaults to dark
-        }
-        if (color === '#' || color === '') {
-            return true; // Defaults to dark
-        }
-        if (color.substring(0, 1) !== '#') {
-            color = '#' + color;
-        }
-        const rgb = parseInt(color.substring(1, 7), 16); // convert rrggbb to decimal
-        const r = (rgb >> 16) & 0xff; // extract red
-        const g = (rgb >> 8) & 0xff; // extract green
-        const b = (rgb >> 0) & 0xff; // extract blue
-        // this is a quick and dirty implementation of the WCAG 3.0 APCA color contrast formula
-        // see: https://gist.github.com/Myndex/e1025706436736166561d339fd667493#andys-shortcut-to-luminance--lightness
-        const Ys = Math.pow(r / 255.0, 2.2) * 0.2126 +
-            Math.pow(g / 255.0, 2.2) * 0.7152 +
-            Math.pow(b / 255.0, 2.2) * 0.0722;
-        return Math.pow(Ys, 0.678) >= 0.5;
+        editSpan.addEventListener('blur', () => saveTitleEdit(link, editSpan));
     }
     /**
-     * Save changes (send API request if text is modified).
+     * Determines if given hex color string is dark, for contrast calculation.
+     * Uses an approximation of WCAG APCA formula.
+     * @param color Color string e.g. '#ff0000' or 'ff0000'
+     * @returns True if color is dark, false otherwise
      */
-    function saveChanges(link, span) {
-        const newText = span.textContent?.trim() || '';
-        const originalText = link.textContent || '';
+    function isColorDark(color) {
+        if (!color || color === '#')
+            return true;
+        if (color[0] !== '#')
+            color = '#' + color;
+        const rgb = parseInt(color.slice(1, 7), 16);
+        const r = (rgb >> 16) & 0xff;
+        const g = (rgb >> 8) & 0xff;
+        const b = rgb & 0xff;
+        const luminance = Math.pow(r / 255, 2.2) * 0.2126 +
+            Math.pow(g / 255, 2.2) * 0.7152 +
+            Math.pow(b / 255, 2.2) * 0.0722;
+        return Math.pow(luminance, 0.678) >= 0.5;
+    }
+    /**
+     * Saves the edited title if it was changed.
+     * Sends API request to update the task title.
+     * @param link The original title link element
+     * @param editSpan The editable span containing new text
+     */
+    function saveTitleEdit(link, editSpan) {
+        const newText = editSpan.textContent?.trim() ?? '';
+        const originalText = link.textContent ?? '';
         if (!newText || newText === originalText) {
-            resetView(link, span, originalText);
+            restoreTitleView(link, editSpan, originalText);
             return;
         }
         const taskId = link.href.split('/').pop();
@@ -261,88 +252,89 @@
                 data: JSON.stringify({ title: newText })
             });
         }
-        resetView(link, span, newText);
+        restoreTitleView(link, editSpan, newText);
     }
-    /**
-     * Cancel editing and restore the original view.
-     */
-    function cancelEdit(link, span) {
-        resetView(link, span, link.textContent || '');
+    /** Cancels edit mode and restores original title view without changes */
+    function cancelTitleEdit(link, editSpan) {
+        restoreTitleView(link, editSpan, link.textContent ?? '');
     }
-    /**
-     * Restore link and hide editable span.
-     */
-    function resetView(link, span, text) {
+    /** Restores the title view by hiding the editable span and showing the link */
+    function restoreTitleView(link, editSpan, text) {
         link.textContent = text;
         link.classList.remove('hidden');
-        span.classList.add('hidden');
+        editSpan.classList.add('hidden');
     }
+    //---------------- Done Checkbox Column Enhancement ----------------
     /**
-     * Enhance the "Done" column with checkboxes.
+     * Enhances the "Done" column to include interactive checkboxes for marking tasks as done.
      */
     function enhanceDoneColumn() {
-        const doneIndex = getCheckedColumnIndex(DONE);
-        if (doneIndex === -1)
+        const doneColIndex = getCheckedColumnIndex(COLUMN_DONE);
+        if (doneColIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${doneIndex + 1}):not(.enhanced)`);
-        cells.forEach(setupDoneCell);
+        const doneCells = document.querySelectorAll(`table td:nth-child(${doneColIndex + 1}):not(.enhanced)`);
+        doneCells.forEach(setupDoneCell);
     }
     /**
-     * Setup a single "Done" cell with checkbox + label.
+     * Sets up an individual "Done" cell with a checkbox and label, attaching event handlers.
+     * @param cell The table cell for the "Done" column
      */
     function setupDoneCell(cell) {
         cell.classList.add('enhanced');
-        const hasDoneElement = Boolean(cell.querySelector('.is-done--small'));
-        cell.innerHTML = buildDoneCellHTML(hasDoneElement);
-        const doneElement = cell.querySelector('.is-done--small');
-        const inputElement = cell.querySelector('input');
-        if (!doneElement || !inputElement)
+        const hasDoneLabel = Boolean(cell.querySelector('.is-done--small'));
+        cell.innerHTML = buildDoneCellInnerHtml(hasDoneLabel);
+        const doneLabelDiv = cell.querySelector('.is-done--small');
+        const checkbox = cell.querySelector('input[type="checkbox"]');
+        if (!doneLabelDiv || !checkbox)
             return;
-        syncDoneState(doneElement, inputElement.checked);
-        bindDoneEvents(inputElement, cell.closest('tr'));
+        updateDoneLabelVisibility(doneLabelDiv, checkbox.checked);
+        attachDoneCheckboxEvents(checkbox, cell.closest('tr'));
     }
     /**
-     * Build HTML for a "Done" cell.
+     * Builds inner HTML string for a "Done" cell.
+     * @param isChecked True if task is done; checkbox checked state
+     * @returns HTML string with checkbox and "Done" label
      */
-    function buildDoneCellHTML(isChecked) {
-        const doneLabel = `
-        <div data-v-85863e0a="" data-v-dd8cbb24="" 
-             class="is-done is-done--small" 
-             style="flex: 1; width: 100%;">Done</div>
-    `;
+    function buildDoneCellInnerHtml(isChecked) {
+        const doneLabelHtml = `<div class="is-done is-done--small" style="flex: 1; width: 100%;">${getDoneColumnText()}</div>`;
         return `
-        <div style="display: flex; align-items: center; gap: 6px;">
-            <input class="bulk-edit" type="checkbox" ${isChecked ? 'checked' : ''}/>
-            ${doneLabel}
-        </div>
-    `;
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <input class="bulk-edit" type="checkbox" ${isChecked ? 'checked' : ''} />
+                ${doneLabelHtml}
+            </div>
+        `;
     }
     /**
-     * Attach change event to a checkbox and handle single or bulk updates.
+     * Attaches the checkbox change event to update task done status.
+     * Handles both single and bulk operations.
+     * @param checkbox The checkbox input element
+     * @param row The table row element
      */
-    function bindDoneEvents(input, tr) {
-        input.addEventListener('change', () => {
-            const isChecked = input.checked;
-            const tbody = tr.closest('tbody');
+    function attachDoneCheckboxEvents(checkbox, row) {
+        checkbox.addEventListener('change', () => {
+            const isChecked = checkbox.checked;
+            const tbody = row.closest('tbody');
             if (!tbody)
                 return;
-            if (tr.classList.contains('bulk-selected')) {
-                updateBulkRowsDone(tbody, isChecked);
+            if (row.classList.contains('bulk-selected')) {
+                updateDoneForBulkRows(tbody, isChecked);
             }
             else {
-                updateSingleRowDone(tr, isChecked);
+                updateDoneForRow(row, isChecked);
             }
         });
     }
     /**
-     * Update a single row checkbox and send API request.
+     * Updates the done state UI for a single task row and sends API request.
+     * @param row The task's table row element
+     * @param done True if task is done, false otherwise
      */
-    function updateSingleRowDone(tr, isChecked) {
-        const doneElement = tr.querySelector('.is-done--small');
-        if (!doneElement)
+    function updateDoneForRow(row, done) {
+        const doneLabelDiv = row.querySelector('.is-done--small');
+        if (!doneLabelDiv)
             return;
-        syncDoneState(doneElement, isChecked);
-        const taskId = getTaskIdByTr(tr);
+        updateDoneLabelVisibility(doneLabelDiv, done);
+        const taskId = getTaskIdByRow(row);
         GM_xmlhttpRequest({
             method: 'POST',
             url: `/api/v1/tasks/${taskId}`,
@@ -350,15 +342,17 @@
                 Authorization: `Bearer ${getJwtToken()}`,
                 'Content-Type': 'application/json'
             },
-            data: JSON.stringify({ done: isChecked })
+            data: JSON.stringify({ done })
         });
     }
     /**
-     * Update all rows with the 'bulk-selected' class to match checkbox state.
+     * Updates the done state for all bulk-selected rows with UI update and bulk API request.
+     * @param tbody The tbody element containing rows
+     * @param done True if marking all tasks done, false otherwise
      */
-    function updateBulkRowsDone(tbody, isChecked) {
+    function updateDoneForBulkRows(tbody, done) {
         const bulkRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
-        // Send bulk API request
+        const idsToUpdate = bulkRows.map(getTaskIdByRow);
         GM_xmlhttpRequest({
             method: 'POST',
             url: `/api/v1/tasks/bulk`,
@@ -367,230 +361,265 @@
                 'Content-Type': 'application/json'
             },
             data: JSON.stringify({
-                done: isChecked,
-                task_ids: bulkRows.map(getTaskIdByTr)
+                done,
+                task_ids: idsToUpdate
             })
         });
-        // Update UI for all bulk rows
         bulkRows.forEach((row) => {
-            const rowInput = row.querySelector('input[type="checkbox"]');
-            const rowDone = row.querySelector('.is-done--small');
-            if (rowInput && rowDone) {
-                rowInput.checked = isChecked;
-                syncDoneState(rowDone, isChecked);
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            const doneLabelDiv = row.querySelector('.is-done--small');
+            if (checkbox && doneLabelDiv) {
+                checkbox.checked = done;
+                updateDoneLabelVisibility(doneLabelDiv, done);
             }
         });
     }
     /**
-     * Show or hide the "Done" label based on checkbox state.
+     * Toggles visibility of the "Done" label in the cell based on checkbox state.
+     * @param doneLabel The "Done" label div
+     * @param isChecked Whether the checkbox is checked
      */
-    function syncDoneState(doneElement, isChecked) {
-        doneElement.classList.toggle('hidden', !isChecked);
+    function updateDoneLabelVisibility(doneLabel, isChecked) {
+        doneLabel.classList.toggle('hidden', !isChecked);
+    }
+    //---------------- Fetch Tasks Utilities ----------------
+    /**
+     * Retrieves all unique task IDs from the table rows.
+     * @returns Array of numeric task IDs
+     */
+    function getAllTaskIdsFromTable() {
+        const links = document.querySelectorAll('tbody tr a');
+        const ids = Array.from(links).map((link) => getTaskIdFromElement(link));
+        return Array.from(new Set(ids));
     }
     /**
-     * Retrieve all task IDs from the table rows.
+     * Fetches tasks by their IDs from the backend API, caches the results.
+     * @param taskIds Array of task IDs to fetch
+     * @returns Promise resolving to array of Task objects
      */
-    function getTaskIdsFromTable() {
-        const taskLinks = document.querySelectorAll('tbody tr a');
-        return [
-            ...new Set(Array.from(taskLinks).map((link) => getTaskIdFromElement(link)))
-        ];
-    }
-    async function fetchFromApiDynamic(taskIds) {
-        const result = [];
-        let remainingIds = [...taskIds];
-        while (remainingIds.length > 0) {
-            // ส่ง request กับทุก id ที่เหลือ
-            const res = await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: '/api/v1/tasks/all?filter=' +
-                        encodeURIComponent('id in ' + remainingIds.join(',')),
-                    headers: {
-                        Authorization: `Bearer ${getJwtToken()}`,
-                        'Content-Type': 'application/json'
-                    },
-                    onload: (r) => resolve(r),
-                    onerror: (e) => reject(e)
-                });
-            });
-            const data = JSON.parse(res.responseText);
-            result.push(...data);
-            // ลบ id ที่ได้แล้ว
-            const fetchedIds = data.map((task) => task.id);
-            remainingIds = remainingIds.filter((id) => !fetchedIds.includes(id));
-            // ถ้า API คืนค่ามาน้อยกว่า request → ไม่มี id เหลือ → break
-            if (fetchedIds.length === 0)
-                break;
-        }
-        return result;
-    }
     async function fetchTasksByIds(taskIds) {
         const idsToFetch = taskIds.filter((id) => !taskCache[id]);
         if (idsToFetch.length > 0) {
-            const fetchedTasks = await fetchFromApiDynamic(idsToFetch);
+            const fetchedTasks = await fetchTasksFromApi(idsToFetch);
             fetchedTasks.forEach((task) => {
                 taskCache[task.id] = task;
             });
         }
         return taskIds.map((id) => taskCache[id]);
     }
+    /**
+     * Fetches tasks from API dynamically in batches.
+     * @param taskIds Array of task IDs to fetch
+     * @returns Promise resolving to an array of Task objects
+     */
+    async function fetchTasksFromApi(taskIds) {
+        const results = [];
+        let remainingIds = [...taskIds];
+        while (remainingIds.length > 0) {
+            // Compose filter query
+            const filterQuery = 'id in ' + remainingIds.join(',');
+            const response = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: `/api/v1/tasks/all?filter=${encodeURIComponent(filterQuery)}`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    onload: resolve,
+                    onerror: reject
+                });
+            });
+            const data = JSON.parse(response.responseText);
+            results.push(...data);
+            const fetchedIds = data.map((task) => task.id);
+            remainingIds = remainingIds.filter((id) => !fetchedIds.includes(id));
+            // Break if no more tasks fetched in this iteration
+            if (fetchedIds.length === 0)
+                break;
+        }
+        return results;
+    }
+    /**
+     * Fetches a single task by ID, utilizing cached data if available.
+     * @param taskId Task ID
+     * @returns Promise resolving to Task object
+     */
     async function fetchTaskById(taskId) {
         return (await fetchTasksByIds([taskId]))[0];
     }
+    //---------------- Priority Column Enhancement ----------------
     /**
-     * Enhance the "Priority" column by replacing cells with dropdown selectors.
+     * Enhances the "Priority" column with dropdown select controls for each row.
+     * When priority changes, bulk selected tasks update.
      */
     async function enhancePriorityColumn() {
-        const priorityIndex = getCheckedColumnIndex(PRIORITY);
-        if (priorityIndex === -1)
+        const priorityColIndex = getCheckedColumnIndex(COLUMN_PRIORITY);
+        if (priorityColIndex === -1)
             return;
-        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
+        const tasks = await fetchTasksByIds(getAllTaskIdsFromTable());
         const tbody = document.querySelector('tbody');
         if (!tbody)
             return;
-        const rows = document.querySelectorAll('tbody tr');
-        rows.forEach((row) => setupPriorityCell(row, taskData, priorityIndex));
+        const rows = tbody.querySelectorAll('tr');
+        rows.forEach((row) => setupPriorityCell(row, tasks, priorityColIndex));
     }
     /**
-     * Setup priority cell for a single row.
+     * Sets up a priority cell in a row with a styled select dropdown.
+     * @param row Table row element
+     * @param tasks Array of Task objects for lookup
+     * @param colIndex Index of the priority column
      */
-    function setupPriorityCell(row, taskData, priorityIndex) {
-        const taskId = getTaskIdByTr(row);
-        const td = row.children[priorityIndex];
-        if (td.classList.contains('enhanced'))
+    function setupPriorityCell(row, tasks, colIndex) {
+        const taskId = getTaskIdByRow(row);
+        const cell = row.children[colIndex];
+        if (cell.classList.contains('enhanced'))
             return;
-        td.classList.add('enhanced');
+        cell.classList.add('enhanced');
         const wrapper = document.createElement('div');
         wrapper.classList.add('select');
-        const select = createPrioritySelect();
-        const currentPriority = taskData.find((task) => task.id === taskId)?.priority ?? 0;
-        updateSelectStyle(select, currentPriority);
+        const select = createPrioritySelectElement();
+        const currentPriority = tasks.find((task) => task.id === taskId)?.priority ?? 0;
+        updatePrioritySelectStyle(select, currentPriority);
         wrapper.appendChild(select);
-        td.innerHTML = '';
-        td.appendChild(wrapper);
-        bindPriorityEvents(select, row);
+        cell.innerHTML = '';
+        cell.appendChild(wrapper);
+        bindPrioritySelectChangeEvent(select, row);
     }
-    /**
-     * Create a <select> element for priority options.
-     */
-    function createPrioritySelect() {
+    /** Creates a <select> element with priority options and styled colors */
+    function createPrioritySelectElement() {
         const select = document.createElement('select');
-        select.classList.add('priority-select');
-        select.classList.add('bulk-edit');
+        select.classList.add('priority-select', 'bulk-edit');
         select.innerHTML = `
-        <option value="0" style="color: var(--info);">Unset</option>
-        <option value="1" style="color: var(--info);">Low</option>
-        <option value="2" style="color: var(--warning);">Medium</option>
-        <option value="3" style="color: var(--danger);">High</option>
-        <option value="4" style="color: var(--danger);">Urgent</option>
-        <option value="5" style="color: var(--danger);">DO NOW</option>
-    `;
+            <option value="0" style="color: var(--info);">Unset</option>
+            <option value="1" style="color: var(--info);">Low</option>
+            <option value="2" style="color: var(--warning);">Medium</option>
+            <option value="3" style="color: var(--danger);">High</option>
+            <option value="4" style="color: var(--danger);">Urgent</option>
+            <option value="5" style="color: var(--danger);">DO NOW</option>
+        `;
         return select;
     }
     /**
-     * Update the <select> element value and style based on priority.
+     * Updates the priority select's value and text color to reflect priority.
+     * @param select The select element
+     * @param priority Numeric priority value
      */
-    function updateSelectStyle(select, priority) {
+    function updatePrioritySelectStyle(select, priority) {
         select.value = priority.toString();
         if (select.selectedOptions[0]) {
             select.style.color = select.selectedOptions[0].style.color;
         }
     }
     /**
-     * Bind event handlers for priority change (single vs bulk update).
+     * Binds change event on priority select, updating all bulk-selected rows.
+     * @param select The priority select element
+     * @param row The table row where select resides
      */
-    function bindPriorityEvents(select, row) {
+    function bindPrioritySelectChangeEvent(select, row) {
         select.addEventListener('change', () => {
             const tbody = row.closest('tbody');
             if (!tbody)
                 return;
-            const priority = +select.value;
-            updateBulkRowsPriority(tbody, priority);
-            updateSelectStyle(select, priority);
+            const priorityValue = +select.value;
+            updateBulkRowsPriority(tbody, priorityValue);
+            updatePrioritySelectStyle(select, priorityValue);
         });
     }
     /**
-     * Update all bulk-selected rows' priority via API + update UI.
+     * Updates priority of all bulk-selected rows with UI updates and bulk API request.
+     * @param tbody TBody element containing rows
+     * @param priority Numeric priority to set
      */
     function updateBulkRowsPriority(tbody, priority) {
         const bulkRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
-        // Send bulk API request
+        const taskIds = bulkRows.map(getTaskIdByRow);
         GM_xmlhttpRequest({
             method: 'POST',
-            url: `/api/v1/tasks/bulk`,
+            url: '/api/v1/tasks/bulk',
             headers: {
                 Authorization: `Bearer ${getJwtToken()}`,
                 'Content-Type': 'application/json'
             },
             data: JSON.stringify({
-                priority,
-                task_ids: bulkRows.map(getTaskIdByTr)
+                priority: priority,
+                task_ids: taskIds
             })
         });
-        // Update UI for all bulk rows
         bulkRows.forEach((row) => {
             const select = row.querySelector('.priority-select');
             if (select)
-                updateSelectStyle(select, priority);
+                updatePrioritySelectStyle(select, priority);
         });
     }
-    function utcToDatetimeLocal(utcString) {
+    //---------------- Date Column Enhancement (Due, Start, End) ----------------
+    /**
+     * Converts UTC datetime string to local datetime string formatted for <input type="datetime-local">
+     * @param utcString UTC datetime ISO string
+     * @returns Local datetime string formatted as yyyy-MM-ddThh:mm
+     */
+    function utcToLocalDatetimeInputValue(utcString) {
         const date = new Date(utcString);
         const pad = (num) => String(num).padStart(2, '0');
         const year = date.getFullYear();
-        const month = pad(date.getMonth() + 1); // Months are 0-based
+        const month = pad(date.getMonth() + 1); // zero-based month
         const day = pad(date.getDate());
         const hours = pad(date.getHours());
         const minutes = pad(date.getMinutes());
         return `${year}-${month}-${day}T${hours}:${minutes}`;
     }
     /**
-     * Enhance a date column (start_date or due_date) with datetime-local inputs.
-     * @param columnKey - The constant for the column (START_DATE or DUE_DATE)
-     * @param className - The CSS class for the input element
-     * @param dateField - The field name in task data ('start_date' or 'due_date')
+     * Enhances a date column with input elements of type datetime-local.
+     * @param columnConstant Column constant (e.g. COLUMN_DUE_DATE)
+     * @param inputClassName CSS class to assign to datetime input
+     * @param dateField Field of Task used for this date ('due_date', 'start_date', 'end_date')
      */
-    async function enhanceDateColumn(columnKey, className, dateField) {
-        const colIndex = getCheckedColumnIndex(columnKey);
+    async function enhanceDateColumn(columnConstant, inputClassName, dateField) {
+        const colIndex = getCheckedColumnIndex(columnConstant);
         if (colIndex === -1)
             return;
         const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
-        const taskData = await fetchTasksByIds(getTaskIdsFromTable());
-        cells.forEach((cell) => setupDateCell(cell, taskData, className, dateField));
+        const tasks = await fetchTasksByIds(getAllTaskIdsFromTable());
+        cells.forEach((cell) => setupDateCell(cell, tasks, inputClassName, dateField));
     }
     /**
-     * Setup a single date cell with input element and change handler.
+     * Sets up a single date cell with a datetime-local input and appropriate event handling.
+     * @param cell Table cell element
+     * @param tasks Array of task data
+     * @param className Class name for the input element
+     * @param dateField Task field for date ('due_date', 'start_date', 'end_date')
      */
-    function setupDateCell(cell, taskData, className, dateField) {
+    function setupDateCell(cell, tasks, className, dateField) {
         cell.classList.add('enhanced');
         const taskId = getTaskIdFromElement(cell);
-        const dateValue = taskData.find((task) => task.id === taskId)?.[dateField];
+        const dateValue = tasks.find((task) => task.id === taskId)?.[dateField];
         const input = document.createElement('input');
         input.type = 'datetime-local';
-        input.classList.add(className);
-        input.classList.add('bulk-edit');
+        input.classList.add(className, 'bulk-edit');
         if (dateValue && dateValue !== '0001-01-01T00:00:00Z') {
-            input.value = utcToDatetimeLocal(dateValue);
+            input.value = utcToLocalDatetimeInputValue(dateValue);
         }
         cell.innerHTML = '';
         cell.appendChild(input);
-        input.addEventListener('change', () => handleDateChange(cell, input, className, dateField));
+        input.addEventListener('change', () => handleDateInputChange(cell, input, className, dateField));
     }
     /**
-     * Handle change event for a date input (single or bulk update).
+     * Handles change events on date inputs, applying changes to bulk-selected rows via API call.
+     * @param cell The cell containing the input
+     * @param input The datetime-local input element
+     * @param inputClassName CSS class name for date input
+     * @param dateField Task date field to update
      */
-    function handleDateChange(cell, input, inputClassName, dateField) {
+    function handleDateInputChange(cell, input, inputClassName, dateField) {
         const tr = cell.closest('tr');
         if (!tr)
             return;
         const newDateUTC = new Date(input.value).toISOString();
-        const rows = Array.from(document.querySelectorAll('tbody tr.bulk-selected'));
-        const taskIds = rows.map(getTaskIdByTr);
-        // Bulk API request
+        const selectedRows = Array.from(document.querySelectorAll('tbody tr.bulk-selected'));
+        const taskIds = selectedRows.map(getTaskIdByRow);
         GM_xmlhttpRequest({
             method: 'POST',
-            url: `/api/v1/tasks/bulk`,
+            url: '/api/v1/tasks/bulk',
             headers: {
                 Authorization: `Bearer ${getJwtToken()}`,
                 'Content-Type': 'application/json'
@@ -600,83 +629,85 @@
                 task_ids: taskIds
             })
         });
-        // Update UI for all bulk-selected rows
-        rows.forEach((row) => {
+        // Update inputs for all bulk-selected rows for this date class
+        selectedRows.forEach((row) => {
             const rowInput = row.querySelector(`.${inputClassName}`);
-            if (rowInput)
+            if (rowInput) {
                 rowInput.value = input.value;
+            }
         });
     }
-    /**
-     * Wrapper functions for specific columns
-     */
+    /** Shortcut wrappers for specific date columns */
     async function enhanceDueDateColumn() {
-        await enhanceDateColumn(DUE_DATE, 'due-date-datetime-local', 'due_date');
+        await enhanceDateColumn(COLUMN_DUE_DATE, 'due-date-datetime-local', 'due_date');
     }
     async function enhanceStartDateColumn() {
-        await enhanceDateColumn(START_DATE, 'start-date-datetime-local', 'start_date');
+        await enhanceDateColumn(COLUMN_START_DATE, 'start-date-datetime-local', 'start_date');
     }
     async function enhanceEndDateColumn() {
-        await enhanceDateColumn(END_DATE, 'end-date-datetime-local', 'end_date');
+        await enhanceDateColumn(COLUMN_END_DATE, 'end-date-datetime-local', 'end_date');
     }
+    //---------------- Progress Column Enhancement ----------------
     /**
-     * Enhance the "Progress" column to allow inline editing on double-click.
+     * Enhances "Progress" column to support double-click inline editing of progress percentage.
      */
     function enhanceProgressColumn() {
-        const colIndex = getCheckedColumnIndex(PROGRESS);
-        if (colIndex === -1)
+        const progressColIndex = getCheckedColumnIndex(COLUMN_PROGRESS);
+        if (progressColIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
+        const cells = document.querySelectorAll(`table td:nth-child(${progressColIndex + 1}):not(.enhanced)`);
         cells.forEach((cell) => {
             cell.style.cursor = 'pointer';
-            cell.classList.add('bulk-edit');
-            cell.classList.add('enhanced');
-            attachProgressEditor(cell);
+            cell.classList.add('bulk-edit', 'enhanced');
+            attachProgressEditingToCell(cell);
         });
     }
     /**
-     * Attach double-click editor to a single cell.
+     * Attaches double-click listener to a cell to enable editing progress inline.
+     * @param cell Table cell element for progress
      */
-    function attachProgressEditor(cell) {
-        cell.addEventListener('dblclick', function (e) {
-            if (e.target && e.target.tagName === 'INPUT')
-                return;
-            const currentProgress = parseInt(cell.innerText) || 0;
-            const input = createProgressInput(currentProgress);
-            const label = document.createElement('span');
-            label.innerText = '%';
+    function attachProgressEditingToCell(cell) {
+        cell.addEventListener('dblclick', (event) => {
+            if (event.target &&
+                event.target.tagName === 'INPUT') {
+                return; // already editing
+            }
+            const currentValue = parseInt(cell.innerText) || 0;
+            const input = createProgressInput(currentValue);
+            const percentLabel = document.createElement('span');
+            percentLabel.innerText = '%';
             cell.innerHTML = '';
             cell.appendChild(input);
-            cell.appendChild(label);
-            // Focus and select the input for convenience
+            cell.appendChild(percentLabel);
             input.focus();
             input.select();
-            // Bind events to handle saving/canceling
-            bindProgressInputEvents(input, cell, currentProgress);
+            bindProgressInputEvents(input, cell, currentValue);
         });
     }
-    /**
-     * Create an input element for editing progress.
-     */
-    function createProgressInput(value) {
+    /** Creates a numeric input for progress editing constrained between 0 and 100 */
+    function createProgressInput(initialValue) {
         const input = document.createElement('input');
         input.type = 'number';
-        input.value = value.toString();
+        input.value = initialValue.toString();
         input.min = '0';
         input.max = '100';
         input.classList.add('edit-progress');
         return input;
     }
     /**
-     * Check if the given progress value is valid (0–100).
+     * Validates that progress value is an integer between 0 and 100 inclusive.
+     * @param progress Number input progress value
+     * @returns True if valid progress, false otherwise
      */
-    function isValidProgress(progress) {
+    function isValidProgressValue(progress) {
         return !isNaN(progress) && progress >= 0 && progress <= 100;
     }
     /**
-     * Send API request to update progress for multiple tasks (bulk).
+     * Sends API requests to update progress for a list of tasks in bulk.
+     * @param taskIds Array of task IDs to update
+     * @param newProgress New progress value (percentage from 0 to 100)
      */
-    function updateBulkTaskProgress(taskIds, newProgress) {
+    function updateBulkProgress(taskIds, newProgress) {
         for (const taskId of taskIds) {
             GM_xmlhttpRequest({
                 method: 'POST',
@@ -692,100 +723,98 @@
         }
     }
     /**
-     * Update the UI for bulk-selected rows after saving.
+     * Updates the progress UI for all bulk-selected rows to display the new progress percentage.
+     * @param newProgress New progress value (percentage)
      */
     function updateBulkProgressUI(newProgress) {
-        const colIndex = getCheckedColumnIndex(PROGRESS);
+        const progressColIndex = getCheckedColumnIndex(COLUMN_PROGRESS);
         document
             .querySelectorAll('tbody tr.bulk-selected')
             .forEach((row) => {
-            const td = row.querySelector(`td:nth-child(${colIndex + 1})`);
-            if (td)
-                td.innerText = `${newProgress}%`;
+            const progressCell = row.querySelector(`td:nth-child(${progressColIndex + 1})`);
+            if (progressCell) {
+                progressCell.innerText = `${newProgress}%`;
+            }
         });
     }
     /**
-     * Bind event listeners for the progress input element.
+     * Hooks event listeners for the progress input box to save or cancel editing.
+     * @param input Input element for progress editing
+     * @param cell Table cell containing the input
+     * @param originalValue Original progress value before editing
      */
-    function bindProgressInputEvents(input, cell, originalProgress) {
-        /**
-         * Save the progress value to the API and update the cell text.
-         */
-        const saveProgress = () => {
-            const newProgress = Math.round(parseInt(input.value) / 10) * 10;
-            if (isValidProgress(newProgress)) {
-                const tr = cell.closest('tr');
-                const taskId = getTaskIdFromElement(cell);
-                // Collect all bulk-selected task IDs
-                const taskIds = Array.from(document.querySelectorAll('tbody tr.bulk-selected')).map(getTaskIdByTr);
-                // Bulk update API request
-                updateBulkTaskProgress(taskIds, newProgress);
-                // Update UI for all bulk-selected rows
+    function bindProgressInputEvents(input, cell, originalValue) {
+        const saveEditedProgress = () => {
+            // Round progress to nearest multiple of 10
+            const newProgressRaw = parseInt(input.value);
+            const newProgress = Math.round(newProgressRaw / 10) * 10;
+            if (isValidProgressValue(newProgress)) {
+                const taskIds = Array.from(document.querySelectorAll('tbody tr.bulk-selected')).map(getTaskIdByRow);
+                updateBulkProgress(taskIds, newProgress);
                 updateBulkProgressUI(newProgress);
             }
             else {
-                // Revert to original value if invalid
-                cell.innerText = `${originalProgress}%`;
+                // Revert if invalid value entered
+                cell.innerText = `${originalValue}%`;
             }
         };
-        // Save on Enter, cancel on Escape
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter')
-                saveProgress();
-            else if (e.key === 'Escape')
-                cell.innerText = `${originalProgress}%`;
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                saveEditedProgress();
+            }
+            else if (event.key === 'Escape') {
+                cell.innerText = `${originalValue}%`;
+            }
         });
-        // Save on blur (clicking outside)
-        input.addEventListener('blur', saveProgress);
+        input.addEventListener('blur', saveEditedProgress);
     }
+    //---------------- Assignees Column Enhancement ----------------
     /**
-     * Entry point: Enhance the assignees column by making cells clickable and attaching the editor.
+     * Enhances the assignees column to allow opening an assignee menu on click.
      */
     function enhanceAssigneesColumn() {
-        const colIndex = getCheckedColumnIndex(ASSIGNEES);
-        if (colIndex === -1)
+        const columnIndex = getCheckedColumnIndex(COLUMN_ASSIGNEES);
+        if (columnIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
-        cells.forEach((cell) => {
+        const assigneeCells = document.querySelectorAll(`table td:nth-child(${columnIndex + 1}):not(.enhanced)`);
+        assigneeCells.forEach((cell) => {
             cell.style.cursor = 'pointer';
-            cell.classList.add('bulk-edit');
-            cell.classList.add('enhanced');
-            attachAssigneesEditor(cell);
+            cell.classList.add('bulk-edit', 'enhanced');
+            attachAssigneeMenuTrigger(cell);
         });
     }
     /**
-     * Attach click listener that opens the assignees menu.
+     * Attaches click handler that shows assignee selection menu for the cell.
+     * @param cell Table cell element in assignees column
      */
-    function attachAssigneesEditor(cell) {
-        cell.addEventListener('click', (e) => {
-            const target = e.target;
-            // Prevent reopening when clicking inside the menu
+    function attachAssigneeMenuTrigger(cell) {
+        cell.addEventListener('click', (event) => {
+            const target = event.target;
             if ((target && target.closest('#assigneesMenu')) ||
-                !document.contains(target))
-                return;
-            closeExistingAssigneesMenu();
-            openAssignessMenuForCell(cell);
+                !document.contains(target)) {
+                return; // Prevent reopening if clicking inside existing menu or outside document
+            }
+            closeAssigneesMenu();
+            openAssigneesMenuForCell(cell);
         });
     }
-    /**
-     * Close any currently opened assignees menu.
-     */
-    function closeExistingAssigneesMenu() {
+    /** Closes any existing assignees menu */
+    function closeAssigneesMenu() {
         document.querySelector('#assigneesMenu')?.remove();
     }
     /**
-     * Open menu for a specific table cell.
+     * Opens an assignees menu attached to the given cell, initializing its content and handlers.
+     * @param cell Table cell element
      */
-    function openAssignessMenuForCell(cell) {
+    function openAssigneesMenuForCell(cell) {
         cell.style.position = 'relative';
-        const assigneesMenu = createAssigneesMenu();
-        cell.appendChild(assigneesMenu);
-        openAssigneesMenu(cell, assigneesMenu);
+        const menu = createAssigneesMenuElement();
+        cell.appendChild(menu);
+        openAssigneesMenu(cell, menu);
     }
-    /**
-     * Create the base DOM structure for the assignees menu.
-     */
-    function createAssigneesMenu() {
+    /** Creates the base DOM element for the assignees menu */
+    function createAssigneesMenuElement() {
+        // Container div
         const menu = document.createElement('div');
         menu.id = 'assigneesMenu';
         menu.className = 'multiselect';
@@ -796,17 +825,17 @@
             background: 'var(--scheme-main)',
             border: '1px solid #ccc',
             width: '250px',
-            zIndex: 10000,
+            zIndex: '10000',
             boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
             cursor: 'default',
             top: '0',
             left: '0'
         });
-        // Selected assignees list
+        // Div for showing selected assignees
         const selectedList = document.createElement('div');
         selectedList.className = 'selected-list';
         selectedList.id = 'assigneesSelectedList';
-        // Input wrapper
+        // Control wrapper for input field
         const control = document.createElement('div');
         control.className = 'control';
         Object.assign(control.style, {
@@ -828,7 +857,7 @@
         });
         inputWrapper.appendChild(input);
         control.appendChild(inputWrapper);
-        // Search results container
+        // Container for search results below input
         const searchResults = document.createElement('div');
         searchResults.className = 'search-results';
         menu.appendChild(selectedList);
@@ -837,78 +866,60 @@
         return menu;
     }
     /**
-     * Debounce utility: delays execution until after delay has passed.
+     * Opens and initializes the assignees menu: populates selected list, sets up search input and outside click handler.
+     * @param cell Table cell containing the menu
+     * @param menu The assignees menu div element
      */
-    function debounce(func, delay = 300) {
-        let timeout;
-        return function (...args) {
-            if (timeout)
-                clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), delay);
-        };
-    }
-    /**
-     * Throttle utility: ensures function is not called more than once in limit.
-     */
-    function throttle(func, limit) {
-        let inThrottle = false;
-        return function (...args) {
-            if (!inThrottle) {
-                func.apply(this, args);
-                inThrottle = true;
-                setTimeout(() => (inThrottle = false), limit);
-            }
-        };
-    }
-    /**
-     * Show the menu and initialize its content.
-     */
-    async function openAssigneesMenu(cell, assigneesMenu) {
-        assigneesMenu.style.display = 'block';
-        const input = assigneesMenu.querySelector('.input');
-        const assigneesSelectedList = assigneesMenu.querySelector('#assigneesSelectedList');
-        if (!assigneesSelectedList)
+    async function openAssigneesMenu(cell, menu) {
+        menu.style.display = 'block';
+        const inputField = menu.querySelector('.input');
+        const selectedList = menu.querySelector('#assigneesSelectedList');
+        if (!selectedList)
             return;
-        await refreshAssigneesList(cell, assigneesSelectedList);
-        setupAssigneesSearchInput(input, assigneesMenu);
-        setupAssigneesOutsideClickHandler(cell, assigneesMenu);
+        await refreshSelectedAssigneesList(cell, selectedList);
+        setupAssigneesSearchInput(inputField, menu);
+        setupAssigneesMenuOutsideClickHandler(cell, menu);
     }
     /**
-     * Refresh the list of selected assignees inside the menu.
+     * Refreshes the selected assignees list inside the menu based on current task data.
+     * @param cell The related table cell
+     * @param selectedList Container div showing selected assignees
      */
-    async function refreshAssigneesList(cell, assigneesSelectedList) {
-        assigneesSelectedList.innerHTML = '';
+    async function refreshSelectedAssigneesList(cell, selectedList) {
+        selectedList.innerHTML = '';
         const task = await fetchTaskById(getTaskIdFromElement(cell));
         if (task?.assignees) {
             for (const assignee of task.assignees) {
-                assigneesSelectedList.appendChild(await createAssigneeItem(assignee));
+                selectedList.appendChild(await createAssigneeItemElement(assignee));
             }
         }
     }
     /**
-     * Create a selected assignee item with avatar and remove button.
+     * Creates a DOM element for a single selected assignee including avatar and remove button.
+     * @param assignee Assignee object
+     * @returns Div element representing the assignee in the menu
      */
-    async function createAssigneeItem(assignee) {
-        const div = document.createElement('div');
-        div.className = 'user m-2';
-        Object.assign(div.style, {
+    async function createAssigneeItemElement(assignee) {
+        const container = document.createElement('div');
+        container.className = 'user m-2';
+        Object.assign(container.style, {
             position: 'relative',
             display: 'inline-block'
         });
-        const img = document.createElement('img');
-        img.height = 30;
-        img.width = 30;
-        img.className = 'avatar v-popper--has-tooltip';
-        img.style.borderRadius = '100%';
-        img.style.verticalAlign = 'middle';
-        img.src = await fetchAvatar(assignee.username);
-        img.title = assignee.name || assignee.username;
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className =
+        const avatarImg = document.createElement('img');
+        avatarImg.height = 30;
+        avatarImg.width = 30;
+        avatarImg.className = 'avatar v-popper--has-tooltip';
+        avatarImg.style.borderRadius = '100%';
+        avatarImg.style.verticalAlign = 'middle';
+        avatarImg.src = await fetchAvatarImage(assignee.username);
+        avatarImg.title = assignee.name || assignee.username;
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className =
             'base-button base-button--type-button remove-assignee';
-        button.innerText = 'X';
-        Object.assign(button.style, {
+        removeButton.innerText = 'X';
+        Object.assign(removeButton.style, {
             position: 'absolute',
             top: '-4px',
             right: '-4px',
@@ -924,16 +935,17 @@
             textAlign: 'center',
             padding: '0'
         });
-        div.appendChild(img);
-        div.appendChild(button);
-        button.addEventListener('click', () => {
-            const tr = button.closest('tr');
-            if (!tr)
+        container.appendChild(avatarImg);
+        container.appendChild(removeButton);
+        // Event handler to remove assignee from selected tasks
+        removeButton.addEventListener('click', () => {
+            const row = removeButton.closest('tr');
+            if (!row)
                 return;
-            if (tr.classList.contains('bulk-selected')) {
-                const rows = document.querySelectorAll('tr.bulk-selected');
-                for (const row of rows) {
-                    const taskId = getTaskIdFromElement(row);
+            if (row.classList.contains('bulk-selected')) {
+                const bulkRows = document.querySelectorAll('tr.bulk-selected');
+                for (const bulkRow of bulkRows) {
+                    const taskId = getTaskIdFromElement(bulkRow);
                     taskCache[taskId].assignees ??= [];
                     taskCache[taskId].assignees = taskCache[taskId].assignees.filter((a) => a.id !== assignee.id);
                     GM_xmlhttpRequest({
@@ -947,7 +959,7 @@
                 }
             }
             else {
-                const taskId = getTaskIdFromElement(tr);
+                const taskId = getTaskIdFromElement(row);
                 taskCache[taskId].assignees ??= [];
                 taskCache[taskId].assignees = taskCache[taskId].assignees.filter((a) => a.id !== assignee.id);
                 GM_xmlhttpRequest({
@@ -959,41 +971,48 @@
                     }
                 });
             }
-            updateAndRefreshAssignees();
+            refreshAssigneesUI();
         });
-        return div;
+        return container;
     }
     /**
-     * Update the search results and refresh the selected assignees list.
+     * Updates search results and refreshes the entire assignees UI after changes.
      */
-    async function updateAndRefreshAssignees() {
-        const assigneesMenu = document.querySelector('#assigneesMenu');
-        if (!assigneesMenu)
+    async function refreshAssigneesUI() {
+        const menu = document.querySelector('#assigneesMenu');
+        if (!menu)
             return;
-        const cell = assigneesMenu.closest('td');
+        const cell = menu.closest('td');
         if (!cell)
             return;
-        const assigneesSelectedList = document.querySelector('#assigneesSelectedList');
-        if (!assigneesSelectedList)
+        const selectedList = document.querySelector('#assigneesSelectedList');
+        if (!selectedList)
             return;
-        await updateAssigneesSearchResults(assigneesMenu, cell);
-        await refreshAssigneesList(cell, assigneesSelectedList);
+        await updateAssigneeSearchResults(menu, cell);
+        await refreshSelectedAssigneesList(cell, selectedList);
     }
-    async function updateAssigneesSearchResults(assigneesMenu, cell) {
-        const buttons = assigneesMenu.querySelectorAll('.search-results button');
+    /**
+     * Update visibility of assignee search buttons based on current task assignees.
+     * @param menu Assignees menu element
+     * @param cell Related table cell
+     */
+    async function updateAssigneeSearchResults(menu, cell) {
+        const buttons = menu.querySelectorAll('.search-results button');
         const task = await fetchTaskById(getTaskIdFromElement(cell));
-        const taskAssignees = task?.assignees || [];
-        buttons.forEach((btn) => {
-            const assigneeId = parseInt(btn.dataset.assigneeId);
-            btn.style.display = taskAssignees.some((a) => a.id === assigneeId)
+        const assignedUserIds = task?.assignees?.map((a) => a.id) || [];
+        buttons.forEach((button) => {
+            const assigneeId = parseInt(button.dataset.assigneeId);
+            button.style.display = assignedUserIds.includes(assigneeId)
                 ? 'none'
                 : 'flex';
         });
     }
     /**
-     * Fetch avatar image as base64 and cache it.
+     * Fetches avatar image for a username, caches the base64 image string.
+     * @param username Username string
+     * @returns Promise resolving to base64 encoded image string
      */
-    function fetchAvatar(username) {
+    function fetchAvatarImage(username) {
         const size = 30;
         if (avatarCache[username]) {
             return Promise.resolve(avatarCache[username]);
@@ -1023,20 +1042,27 @@
         });
     }
     /**
-     * Setup search input event with debounce.
+     * Sets up the search input field for assignees with a debounce on typing,
+     * and triggers dynamic search with caching.
+     * @param input Search input element
+     * @param menu Assignees menu element containing search results container
      */
-    async function setupAssigneesSearchInput(input, assigneesMenu) {
+    async function setupAssigneesSearchInput(input, menu) {
         if (!input)
             return;
         input.focus();
-        const task = await fetchTaskById(getTaskIdFromElement(input));
-        const debouncedSearch = debounce(() => handleAssigneeSearch(input, assigneesMenu, task.project_id), 300);
-        input.addEventListener('input', debouncedSearch);
-        // Trigger an initial search
-        handleAssigneeSearch(input, assigneesMenu, task.project_id);
+        const currentTask = await fetchTaskById(getTaskIdFromElement(input));
+        const debouncedHandler = debounce(() => handleAssigneeSearch(input, menu, currentTask.project_id), 300);
+        input.addEventListener('input', debouncedHandler);
+        // Initial search trigger to populate results
+        handleAssigneeSearch(input, menu, currentTask.project_id);
     }
     /**
-     * Handle assignee search request and render results.
+     * Handles the assignee search query, fetches suggestions, caches results,
+     * and renders buttons for each assignee.
+     * @param input Search input element
+     * @param menu Assignees menu element
+     * @param projectId Project ID for context
      */
     function handleAssigneeSearch(input, menu, projectId) {
         const query = input.value.trim();
@@ -1044,12 +1070,10 @@
         if (!searchResults)
             return;
         const cacheKey = `${projectId}:${query}`;
-        // ✅ Use cache if available
         if (assigneeSearchCache.has(cacheKey)) {
-            renderAssignees(searchResults, assigneeSearchCache.get(cacheKey));
+            renderAssigneeSearchResults(searchResults, assigneeSearchCache.get(cacheKey));
             return;
         }
-        // Otherwise fetch from API
         GM_xmlhttpRequest({
             url: `/api/v1/projects/${projectId}/projectusers?s=${encodeURIComponent(query)}`,
             method: 'GET',
@@ -1057,29 +1081,38 @@
             responseType: 'json',
             onload: async (response) => {
                 const assignees = response.response ?? [];
-                // ✅ Save result in cache
                 assigneeSearchCache.set(cacheKey, assignees);
-                renderAssignees(searchResults, assignees);
+                renderAssigneeSearchResults(searchResults, assignees);
             }
         });
     }
-    // Helper function to render assignees
-    async function renderAssignees(container, assignees) {
-        const avatarPromises = assignees.map((assignee) => fetchAvatar(assignee.username));
-        await Promise.all(avatarPromises);
+    /**
+     * Renders assignee search results inside the search results container.
+     * @param container Container for search results buttons
+     * @param assignees Array of assignees to render
+     */
+    async function renderAssigneeSearchResults(container, assignees) {
+        // Ensure all avatars are fetched before rendering buttons (avoids flashes)
+        await Promise.all(assignees.map((a) => fetchAvatarImage(a.username)));
         container.innerHTML = '';
         for (const assignee of assignees) {
-            const avatar = await fetchAvatar(assignee.username);
-            const btn = createAssigneeSearchButton(assignee, avatar);
-            container.appendChild(btn);
+            const avatar = await fetchAvatarImage(assignee.username);
+            container.appendChild(createAssigneeSearchButton(assignee, avatar));
         }
-        updateAndRefreshAssignees();
+        refreshAssigneesUI();
     }
+    /**
+     * Creates a button DOM element for an assignee search result with avatar and name.
+     * Click to add to selected tasks.
+     * @param assignee Assignee object
+     * @param avatar Base64 avatar image string
+     * @returns Button element
+     */
     function createAssigneeSearchButton(assignee, avatar) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.dataset.assigneeId = assignee.id.toString();
-        Object.assign(btn.style, {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.assigneeId = assignee.id.toString();
+        Object.assign(button.style, {
             width: '100%',
             border: 'none',
             padding: '6px',
@@ -1089,27 +1122,24 @@
             alignItems: 'center',
             justifyContent: 'space-between'
         });
-        const wrapper = document.createElement('div');
-        Object.assign(wrapper.style, {
+        const labelWrapper = document.createElement('div');
+        Object.assign(labelWrapper.style, {
             display: 'flex',
             alignItems: 'center',
             gap: '6px'
         });
-        // avatar
-        const img = document.createElement('img');
-        img.className = 'avatar';
-        img.src = avatar;
-        img.width = 30;
-        img.height = 30;
-        Object.assign(img.style, {
+        const avatarImg = document.createElement('img');
+        avatarImg.className = 'avatar';
+        avatarImg.src = avatar;
+        avatarImg.width = 30;
+        avatarImg.height = 30;
+        Object.assign(avatarImg.style, {
             borderRadius: '100%',
             verticalAlign: 'middle'
         });
-        // ชื่อ
         const nameSpan = document.createElement('span');
         nameSpan.style.color = 'var(--input-color)';
         nameSpan.textContent = assignee.name || assignee.username;
-        // hint text
         const hintSpan = document.createElement('span');
         hintSpan.className = 'hidden';
         hintSpan.textContent = 'Enter or click';
@@ -1117,14 +1147,14 @@
             fontSize: '12px',
             color: '#888'
         });
-        // ประกอบ element
-        wrapper.appendChild(img);
-        wrapper.appendChild(nameSpan);
-        btn.appendChild(wrapper);
-        btn.appendChild(hintSpan);
-        btn.addEventListener('click', () => {
-            const rows = document.querySelectorAll('tr.bulk-selected');
-            for (const row of rows) {
+        labelWrapper.appendChild(avatarImg);
+        labelWrapper.appendChild(nameSpan);
+        button.appendChild(labelWrapper);
+        button.appendChild(hintSpan);
+        // Click handler to add assignee to all bulk-selected tasks
+        button.addEventListener('click', () => {
+            const bulkRows = document.querySelectorAll('tr.bulk-selected');
+            for (const row of bulkRows) {
                 const taskId = getTaskIdFromElement(row);
                 taskCache[taskId].assignees ??= [];
                 GM_xmlhttpRequest({
@@ -1136,306 +1166,115 @@
                     },
                     data: JSON.stringify({ user_id: assignee.id })
                 });
-                if (taskCache[taskId].assignees.find((a) => a.id === assignee.id))
-                    return;
-                taskCache[taskId].assignees.push(assignee);
+                if (!taskCache[taskId].assignees.some((a) => a.id === assignee.id)) {
+                    taskCache[taskId].assignees.push(assignee);
+                }
             }
-            btn.style.display = 'none';
-            updateAndRefreshAssignees();
+            button.style.display = 'none';
+            refreshAssigneesUI();
         });
-        return btn;
+        return button;
     }
     /**
-     * Close the menu when clicking outside.
+     * Sets up click event on document to close assignees menu when clicking outside.
+     * @param cell Cell hosting the assignees menu
+     * @param menu Assignees menu element
      */
-    function setupAssigneesOutsideClickHandler(cell, assigneesMenu) {
-        document.addEventListener('click', function clickOutside(e) {
-            if (!cell.contains(e.target) &&
-                document.contains(e.target)) {
-                assigneesMenu?.remove();
-                document.removeEventListener('click', clickOutside);
-                refreshAssignessColumn();
+    function setupAssigneesMenuOutsideClickHandler(cell, menu) {
+        document.addEventListener('click', function outsideClickListener(event) {
+            if (!cell.contains(event.target) &&
+                document.contains(event.target)) {
+                menu?.remove();
+                document.removeEventListener('click', outsideClickListener);
+                refreshAssigneesColumnUI();
             }
         });
     }
     /**
-     * Refresh all assignees in the table after closing menu.
+     * Refreshes the entire assignees column UI to show updated assignees after editing.
      */
-    async function refreshAssignessColumn() {
-        const colIndex = getCheckedColumnIndex(ASSIGNEES);
+    async function refreshAssigneesColumnUI() {
+        const colIndex = getCheckedColumnIndex(COLUMN_ASSIGNEES);
         if (colIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(:has(#assigneesMenu))`);
-        for (const cell of cells) {
+        const assigneeCells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(:has(#assigneesMenu))`);
+        for (const cell of assigneeCells) {
             cell.innerHTML = '';
             const task = await fetchTaskById(getTaskIdFromElement(cell));
-            const assignees = task.assignees;
-            if (!assignees)
+            if (!task.assignees)
                 continue;
-            const assigneesList = document.createElement('div');
-            assigneesList.className = 'assignees-list is-inline mis-1';
-            for (const assignee of assignees) {
-                const assigneeEl = document.createElement('span');
-                assigneeEl.className = 'assignee';
-                const userDiv = document.createElement('div');
-                userDiv.className = 'user';
-                userDiv.style.display = 'inline';
-                const avatar = document.createElement('img');
-                avatar.className = 'avatar v-popper--has-tooltip';
-                avatar.width = 28;
-                avatar.height = 28;
-                avatar.style.border = '2px solid var(--white)';
-                avatar.style.borderRadius = '100%';
-                avatar.title = assignee.name || assignee.username;
-                avatar.src = await fetchAvatar(assignee.username);
-                userDiv.appendChild(avatar);
-                assigneeEl.appendChild(userDiv);
-                assigneesList.appendChild(assigneeEl);
+            const container = document.createElement('div');
+            container.className = 'assignees-list is-inline mis-1';
+            for (const assignee of task.assignees) {
+                const assigneeSpan = document.createElement('span');
+                assigneeSpan.className = 'assignee';
+                const userWrapper = document.createElement('div');
+                userWrapper.className = 'user';
+                userWrapper.style.display = 'inline';
+                const avatarImg = document.createElement('img');
+                avatarImg.className = 'avatar v-popper--has-tooltip';
+                avatarImg.width = 28;
+                avatarImg.height = 28;
+                avatarImg.style.border = '2px solid var(--white)';
+                avatarImg.style.borderRadius = '100%';
+                avatarImg.title = assignee.name || assignee.username;
+                avatarImg.src = await fetchAvatarImage(assignee.username);
+                userWrapper.appendChild(avatarImg);
+                assigneeSpan.appendChild(userWrapper);
+                container.appendChild(assigneeSpan);
             }
-            cell.appendChild(assigneesList);
+            cell.appendChild(container);
         }
     }
+    //---------------- Labels Column Enhancement ----------------
+    /**
+     * Enhance labels column with click-to-edit functionality similar to assignees.
+     */
     function enhanceLabelsColumn() {
-        const colIndex = getCheckedColumnIndex(LABELS);
-        if (colIndex === -1)
+        const labelColIndex = getCheckedColumnIndex(COLUMN_LABELS);
+        if (labelColIndex === -1)
             return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(.enhanced)`);
-        cells.forEach((cell) => {
+        const labelCells = document.querySelectorAll(`table td:nth-child(${labelColIndex + 1}):not(.enhanced)`);
+        labelCells.forEach((cell) => {
             cell.style.cursor = 'pointer';
-            cell.classList.add('bulk-edit');
-            cell.classList.add('enhanced');
-            attachLabelsEditor(cell);
+            cell.classList.add('bulk-edit', 'enhanced');
+            attachLabelsMenuTrigger(cell);
         });
     }
-    function attachLabelsEditor(cell) {
-        cell.addEventListener('click', (e) => {
-            const target = e.target;
-            // Prevent reopening when clicking inside the menu
+    /**
+     * Attaches click handler to open labels menu.
+     * @param cell Cell element in labels column
+     */
+    function attachLabelsMenuTrigger(cell) {
+        cell.addEventListener('click', (event) => {
+            const target = event.target;
             if ((target && target.closest('#labelsMenu')) ||
-                !document.contains(target))
-                return;
-            closeExistingLabelsMenu();
+                !document.contains(target)) {
+                return; // Avoid reopening when clicking inside open menu or outside
+            }
+            closeLabelsMenu();
             openLabelsMenuForCell(cell);
         });
     }
+    /** Closes any open labels menu */
+    function closeLabelsMenu() {
+        document.querySelector('#labelsMenu')?.remove();
+    }
     /**
-     * Open menu for a specific table cell.
+     * Opens the labels menu for a specific table cell.
+     * @param cell The cell element in the labels column
      */
     function openLabelsMenuForCell(cell) {
         cell.style.position = 'relative';
-        const assigneesMenu = createLabelsMenu();
-        cell.appendChild(assigneesMenu);
-        openLabelsMenu(cell, assigneesMenu);
-    }
-    async function openLabelsMenu(cell, labelsMenu) {
-        labelsMenu.style.display = 'block';
-        const input = labelsMenu.querySelector('.input');
-        const labelsSelectedList = labelsMenu.querySelector('#labelsSelectedList');
-        if (!labelsSelectedList)
-            return;
-        await refreshLabelsList(cell, labelsSelectedList);
-        setupLabelsSearchInput(input, labelsMenu);
-        setupLabelsOutsideClickHandler(cell, labelsMenu);
-    }
-    function setupLabelsOutsideClickHandler(cell, labelsMenu) {
-        document.addEventListener('click', function clickOutside(e) {
-            if (!cell.contains(e.target) &&
-                document.contains(e.target)) {
-                labelsMenu?.remove();
-                document.removeEventListener('click', clickOutside);
-                refreshLabelsColumn();
-            }
-        });
-    }
-    async function refreshLabelsColumn() {
-        const colIndex = getCheckedColumnIndex(LABELS);
-        if (colIndex === -1)
-            return;
-        const cells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(:has(#labelsMenu))`);
-        for (const cell of cells) {
-            cell.innerHTML = '';
-            const task = await fetchTaskById(getTaskIdFromElement(cell));
-            const labels = task.labels;
-            if (!labels)
-                continue;
-            const labelWrapper = document.createElement('div');
-            labelWrapper.className = 'label-wrapper';
-            // ใช้ for...of สร้าง tag แต่ละอัน
-            for (const label of labels) {
-                const tag = document.createElement('span');
-                tag.className = 'tag';
-                tag.style.backgroundColor = '#' + label.hex_color;
-                tag.style.color = colorIsDark(label.hex_color) ? DARK : LIGHT;
-                const spanText = document.createElement('span');
-                spanText.textContent = label.title;
-                tag.appendChild(spanText);
-                labelWrapper.appendChild(tag);
-            }
-            cell.appendChild(labelWrapper);
-        }
-    }
-    async function setupLabelsSearchInput(input, assigneesMenu) {
-        if (!input)
-            return;
-        input.focus();
-        const debouncedSearch = debounce(() => handleLabelSearch(input, assigneesMenu), 300);
-        input.addEventListener('input', debouncedSearch);
-        // Trigger an initial search
-        handleLabelSearch(input, assigneesMenu);
-    }
-    function handleLabelSearch(input, menu) {
-        const query = input.value.trim();
-        const searchResults = menu.querySelector('.search-results');
-        if (!searchResults)
-            return;
-        const cacheKey = query;
-        // ✅ Use cache if available
-        if (labelSearchCache.has(cacheKey)) {
-            renderLabels(searchResults, labelSearchCache.get(cacheKey));
-            return;
-        }
-        // Otherwise fetch from API
-        GM_xmlhttpRequest({
-            url: `/api/v1/labels?s=${encodeURIComponent(query)}`,
-            method: 'GET',
-            headers: { Authorization: `Bearer ${getJwtToken()}` },
-            responseType: 'json',
-            onload: async (response) => {
-                const labels = response.response ?? [];
-                // ✅ Save result in cache
-                labelSearchCache.set(cacheKey, labels);
-                renderLabels(searchResults, labels);
-            }
-        });
-    }
-    async function renderLabels(container, labels) {
-        container.innerHTML = '';
-        for (const label of labels) {
-            const btn = createLabelSearchButton(label);
-            container.appendChild(btn);
-        }
-        updateAndRefreshLabels();
-    }
-    function createLabelSearchButton(label) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.dataset.labelId = label.id.toString();
-        Object.assign(btn.style, {
-            width: '100%',
-            border: 'none',
-            padding: '6px',
-            textAlign: 'left',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-        });
-        const color = colorIsDark(label.hex_color) ? DARK : LIGHT;
-        btn.innerHTML = `
-      <span>
-        <span  class="tag search-result" style="background-color: #${label.hex_color}; color: ${color}">
-            <span>${label.title}</span>
-        </span>
-       </span>
-      <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
-    `;
-        btn.addEventListener('click', () => {
-            const rows = document.querySelectorAll('tr.bulk-selected');
-            for (const row of rows) {
-                const taskId = getTaskIdFromElement(row);
-                taskCache[taskId].labels ??= [];
-                GM_xmlhttpRequest({
-                    method: 'PUT',
-                    url: `/api/v1/tasks/${taskId}/labels`,
-                    headers: {
-                        Authorization: `Bearer ${getJwtToken()}`,
-                        'Content-Type': 'application/json'
-                    },
-                    data: JSON.stringify({ label_id: label.id })
-                });
-                if (taskCache[taskId].labels.find((a) => a.id === label.id))
-                    return;
-                taskCache[taskId].labels.push(label);
-            }
-            btn.style.display = 'none';
-            updateAndRefreshLabels();
-        });
-        return btn;
-    }
-    async function refreshLabelsList(cell, labelsSelectedList) {
-        labelsSelectedList.innerHTML = '';
-        const task = await fetchTaskById(getTaskIdFromElement(cell));
-        if (task?.labels) {
-            for (const label of task.labels ?? []) {
-                labelsSelectedList.appendChild(await createLabelItem(label));
-            }
-        }
+        const menu = createLabelsMenuElement();
+        cell.appendChild(menu);
+        openLabelsMenu(cell, menu);
     }
     /**
-     * Create a selected assignee item with avatar and remove button.
+     * Creates the base DOM structure for the labels menu.
+     * @returns Div element for labels menu
      */
-    async function createLabelItem(label) {
-        const tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.style.backgroundColor = `#${label.hex_color}`;
-        tag.style.color = colorIsDark(label.hex_color) ? DARK : LIGHT;
-        // สร้าง span สำหรับข้อความ
-        const labelEl = document.createElement('span');
-        labelEl.textContent = label.title;
-        // สร้างปุ่มลบ
-        const deleteButton = document.createElement('button');
-        deleteButton.type = 'button';
-        deleteButton.className =
-            'base-button base-button--type-button delete is-small';
-        // ประกอบทั้งหมด
-        tag.appendChild(labelEl);
-        tag.appendChild(deleteButton);
-        deleteButton.addEventListener('click', async () => {
-            const rows = document.querySelectorAll('tbody tr.bulk-selected');
-            for (const row of rows) {
-                const taskId = getTaskIdFromElement(row);
-                GM_xmlhttpRequest({
-                    method: 'DELETE',
-                    url: `/api/v1/tasks/${taskId}/labels/${label.id}`,
-                    headers: {
-                        Authorization: `Bearer ${getJwtToken()}`
-                    }
-                });
-                taskCache[taskId].labels ??= [];
-                taskCache[taskId].labels = taskCache[taskId].labels.filter((l) => l.id !== label.id);
-            }
-            updateAndRefreshLabels();
-        });
-        return tag;
-    }
-    async function updateAndRefreshLabels() {
-        const labelsMenu = document.querySelector('#labelsMenu');
-        if (!labelsMenu)
-            return;
-        const cell = labelsMenu.closest('td');
-        if (!cell)
-            return;
-        const labelsSelectedList = document.querySelector('#labelsSelectedList');
-        if (!labelsSelectedList)
-            return;
-        await refreshLabelsList(cell, labelsSelectedList);
-        await updateLabelsSearchResults(labelsMenu, cell);
-    }
-    async function updateLabelsSearchResults(labelsMenu, cell) {
-        const buttons = labelsMenu.querySelectorAll('.search-results button');
-        const task = await fetchTaskById(getTaskIdFromElement(cell));
-        const taskLabels = task?.labels || [];
-        buttons.forEach((btn) => {
-            const labelId = parseInt(btn.dataset.labelId);
-            btn.style.display = taskLabels.some((a) => a.id === labelId)
-                ? 'none'
-                : 'flex';
-        });
-    }
-    /**
-     * Create the base DOM structure for the assignees menu.
-     */
-    function createLabelsMenu() {
+    function createLabelsMenuElement() {
         const menu = document.createElement('div');
         menu.id = 'labelsMenu';
         menu.className = 'multiselect';
@@ -1446,13 +1285,12 @@
             background: 'var(--scheme-main)',
             border: '1px solid #ccc',
             width: '250px',
-            zIndex: 10000,
+            zIndex: '10000',
             boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
             cursor: 'default',
             top: '0',
             left: '0'
         });
-        // Selected assignees list
         const selectedList = document.createElement('div');
         selectedList.className = 'selected-list';
         selectedList.id = 'labelsSelectedList';
@@ -1461,7 +1299,6 @@
             flexWrap: 'wrap',
             gap: '6px'
         });
-        // Input wrapper
         const control = document.createElement('div');
         control.className = 'control';
         Object.assign(control.style, {
@@ -1483,7 +1320,6 @@
         });
         inputWrapper.appendChild(input);
         control.appendChild(inputWrapper);
-        // Search results container
         const searchResults = document.createElement('div');
         searchResults.className = 'search-results';
         menu.appendChild(selectedList);
@@ -1491,9 +1327,650 @@
         menu.appendChild(searchResults);
         return menu;
     }
-    function closeExistingLabelsMenu() {
-        document.querySelector('#labelsMenu')?.remove();
+    /**
+     * Opens and initializes the labels menu: populates selected list,
+     * sets up input search and outside click handler.
+     * @param cell Cell element containing the menu
+     * @param menu Labels menu div element
+     */
+    async function openLabelsMenu(cell, menu) {
+        menu.style.display = 'block';
+        const inputField = menu.querySelector('.input');
+        const selectedList = menu.querySelector('#labelsSelectedList');
+        if (!selectedList)
+            return;
+        await refreshSelectedLabelsList(cell, selectedList);
+        setupLabelsSearchInput(inputField, menu);
+        setupLabelsMenuOutsideClickHandler(cell, menu);
     }
+    /**
+     * Sets click handler to close labels menu when clicking outside.
+     * @param cell Cell hosting the menu
+     * @param menu Labels menu div element
+     */
+    function setupLabelsMenuOutsideClickHandler(cell, menu) {
+        document.addEventListener('click', function outsideClickListener(event) {
+            if (!cell.contains(event.target) &&
+                document.contains(event.target)) {
+                menu?.remove();
+                document.removeEventListener('click', outsideClickListener);
+                refreshLabelsColumnUI();
+            }
+        });
+    }
+    /**
+     * Refreshes the entire labels column UI to reflect current labels of tasks.
+     */
+    async function refreshLabelsColumnUI() {
+        const colIndex = getCheckedColumnIndex(COLUMN_LABELS);
+        if (colIndex === -1)
+            return;
+        const labelCells = document.querySelectorAll(`table td:nth-child(${colIndex + 1}):not(:has(#labelsMenu))`);
+        for (const cell of labelCells) {
+            cell.innerHTML = '';
+            const task = await fetchTaskById(getTaskIdFromElement(cell));
+            if (!task.labels)
+                continue;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'label-wrapper';
+            for (const label of task.labels) {
+                const labelTag = document.createElement('span');
+                labelTag.className = 'tag';
+                labelTag.style.backgroundColor = '#' + label.hex_color;
+                labelTag.style.color = isColorDark(label.hex_color)
+                    ? COLOR_DARK
+                    : COLOR_LIGHT;
+                const textSpan = document.createElement('span');
+                textSpan.textContent = label.title;
+                labelTag.appendChild(textSpan);
+                wrapper.appendChild(labelTag);
+            }
+            cell.appendChild(wrapper);
+        }
+    }
+    /**
+     * Sets up the labels search input with debounced search event.
+     * @param input The input element for search
+     * @param menu Labels menu total container
+     */
+    async function setupLabelsSearchInput(input, menu) {
+        if (!input)
+            return;
+        input.focus();
+        const debouncedSearch = debounce(() => handleLabelSearch(input, menu), 300);
+        input.addEventListener('input', debouncedSearch);
+        handleLabelSearch(input, menu);
+    }
+    /**
+     * Handles label search query, performs API request and caches results.
+     * @param input Search input element
+     * @param menu Labels menu div element for search results rendering
+     */
+    function handleLabelSearch(input, menu) {
+        const query = input.value.trim();
+        const searchResults = menu.querySelector('.search-results');
+        if (!searchResults)
+            return;
+        const cacheKey = query;
+        if (labelSearchCache.has(cacheKey)) {
+            renderLabelSearchResults(searchResults, labelSearchCache.get(cacheKey));
+            return;
+        }
+        GM_xmlhttpRequest({
+            url: `/api/v1/labels?s=${encodeURIComponent(query)}`,
+            method: 'GET',
+            headers: { Authorization: `Bearer ${getJwtToken()}` },
+            responseType: 'json',
+            onload: async (response) => {
+                const labels = response.response ?? [];
+                labelSearchCache.set(cacheKey, labels);
+                renderLabelSearchResults(searchResults, labels);
+            }
+        });
+    }
+    /**
+     * Renders label search results as buttons for selection.
+     * @param container Container div for search result buttons
+     * @param labels Array of labels from search results
+     */
+    async function renderLabelSearchResults(container, labels) {
+        container.innerHTML = '';
+        for (const label of labels) {
+            container.appendChild(createLabelSearchButton(label));
+        }
+        refreshLabelsUI();
+    }
+    /**
+     * Creates a button element representing a label from search results.
+     * Clicking adds the label to bulk-selected tasks.
+     * @param label Label object
+     * @returns Button element
+     */
+    function createLabelSearchButton(label) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.labelId = label.id.toString();
+        Object.assign(button.style, {
+            width: '100%',
+            border: 'none',
+            padding: '6px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+        });
+        const color = isColorDark(label.hex_color) ? COLOR_DARK : COLOR_LIGHT;
+        button.innerHTML = `
+            <span>
+                <span class="tag search-result" style="background-color: #${label.hex_color}; color: ${color}">
+                    <span>${label.title}</span>
+                </span>
+            </span>
+            <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
+        `;
+        // Handler to add label to all bulk-selected tasks
+        button.addEventListener('click', () => {
+            const bulkRows = document.querySelectorAll('tr.bulk-selected');
+            for (const row of bulkRows) {
+                const taskId = getTaskIdFromElement(row);
+                taskCache[taskId].labels ??= [];
+                GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: `/api/v1/tasks/${taskId}/labels`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({ label_id: label.id })
+                });
+                if (!taskCache[taskId].labels.some((l) => l.id === label.id)) {
+                    taskCache[taskId].labels.push(label);
+                }
+            }
+            button.style.display = 'none';
+            refreshLabelsUI();
+        });
+        return button;
+    }
+    /**
+     * Refreshes the labels UI by updating selected labels list and search results.
+     */
+    async function refreshLabelsUI() {
+        const menu = document.querySelector('#labelsMenu');
+        if (!menu)
+            return;
+        const cell = menu.closest('td');
+        if (!cell)
+            return;
+        const selectedList = document.querySelector('#labelsSelectedList');
+        if (!selectedList)
+            return;
+        await refreshSelectedLabelsList(cell, selectedList);
+        await updateLabelsSearchResults(menu, cell);
+    }
+    /**
+     * Updates the visibility of label search result buttons based on labels assigned to the current task.
+     * @param menu Labels menu element
+     * @param cell Related table cell
+     */
+    async function updateLabelsSearchResults(menu, cell) {
+        const buttons = menu.querySelectorAll('.search-results button');
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+        const assignedLabelIds = task?.labels?.map((l) => l.id) || [];
+        buttons.forEach((button) => {
+            const labelId = parseInt(button.dataset.labelId);
+            button.style.display = assignedLabelIds.includes(labelId)
+                ? 'none'
+                : 'flex';
+        });
+    }
+    /**
+     * Refreshes the list of selected labels inside the labels menu.
+     * @param cell Related table cell
+     * @param selectedList Container div for selected labels
+     */
+    async function refreshSelectedLabelsList(cell, selectedList) {
+        selectedList.innerHTML = '';
+        const task = await fetchTaskById(getTaskIdFromElement(cell));
+        if (!task?.labels)
+            return;
+        for (const label of task.labels) {
+            selectedList.appendChild(await createLabelItemElement(label));
+        }
+    }
+    /**
+     * Creates a label tag element with a delete button for the labels menu's selected list.
+     * @param label Label object
+     * @returns Span element representing the label tag
+     */
+    async function createLabelItemElement(label) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.style.backgroundColor = `#${label.hex_color}`;
+        tag.style.color = isColorDark(label.hex_color)
+            ? COLOR_DARK
+            : COLOR_LIGHT;
+        const textSpan = document.createElement('span');
+        textSpan.textContent = label.title;
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className =
+            'base-button base-button--type-button delete is-small';
+        tag.appendChild(textSpan);
+        tag.appendChild(deleteButton);
+        // Delete button click event to remove label from bulk-selected tasks
+        deleteButton.addEventListener('click', () => {
+            const bulkRows = document.querySelectorAll('tbody tr.bulk-selected');
+            for (const row of bulkRows) {
+                const taskId = getTaskIdFromElement(row);
+                GM_xmlhttpRequest({
+                    method: 'DELETE',
+                    url: `/api/v1/tasks/${taskId}/labels/${label.id}`,
+                    headers: {
+                        Authorization: `Bearer ${getJwtToken()}`
+                    }
+                });
+                taskCache[taskId].labels ??= [];
+                taskCache[taskId].labels = taskCache[taskId].labels.filter((l) => l.id !== label.id);
+            }
+            refreshLabelsUI();
+        });
+        return tag;
+    }
+    //---------------- Drag & Drop for Bulk Selected Rows ----------------
+    let draggedRows = [];
+    // Handle clicks for row bulk selection
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        const tr = target.closest('tr');
+        const tbody = tr?.closest('tbody');
+        if (!tr || !tbody)
+            return;
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+        // Ignore clicks inside bulk-edit controls already selected
+        if (target.closest('.bulk-edit')?.closest('.bulk-selected')) {
+            return;
+        }
+        else if (!target.closest('.bulk-edit')) {
+            event.preventDefault();
+        }
+        const lastClicked = tbody.querySelector('tr.last-clicked');
+        if (event.shiftKey && lastClicked) {
+            // Select range between last click and current
+            allRows.forEach((row) => row.classList.remove('bulk-selected'));
+            const startIdx = allRows.indexOf(lastClicked);
+            const endIdx = allRows.indexOf(tr);
+            const [minIndex, maxIndex] = [startIdx, endIdx].sort((a, b) => a - b);
+            for (let i = minIndex; i <= maxIndex; i++) {
+                allRows[i].classList.add('bulk-selected');
+            }
+        }
+        else if (event.ctrlKey || event.metaKey) {
+            // Toggle selection on Ctrl+click or Cmd+click
+            tr.classList.toggle('bulk-selected');
+        }
+        else {
+            // Only select the clicked row
+            allRows.forEach((row) => row.classList.remove('bulk-selected'));
+            tr.classList.add('bulk-selected');
+        }
+        // Update last-clicked state
+        allRows.forEach((row) => row.classList.remove('last-clicked'));
+        tr.classList.add('last-clicked');
+    });
+    // Drag start event to collect all dragged rows
+    document.addEventListener('dragstart', (event) => {
+        const tr = event.target.closest('tr');
+        const tbody = tr?.closest('tbody');
+        if (!tr || !tbody || !tr.classList.contains('bulk-selected')) {
+            event.preventDefault();
+            return;
+        }
+        draggedRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', 'dragging');
+    });
+    // Dragover event for rows and table
+    document.addEventListener('dragover', async (event) => {
+        const tr = event.target.closest('tbody tr');
+        const table = event.target.closest('table');
+        const projectMenu = event.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        // Reject dragging onto self or any descendants to avoid cycles
+        if (tr && !tr.classList.contains('bulk-selected')) {
+            const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
+            const parentIds = await getAllParentTaskIds(getTaskIdFromElement(tr));
+            for (const parentId of parentIds) {
+                if (draggedTaskIds.includes(parentId)) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            tr.classList.add('drag-over');
+        }
+        else if (table && !tr) {
+            table.classList.add('drag-over');
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+        }
+        else if (projectMenu &&
+            parseInt(projectMenu.href.split('/').pop() ?? '0') > 0 &&
+            parseInt(projectMenu.href.split('/').pop() ?? '0') !==
+                getProjectId()) {
+            projectMenu.classList.add('drag-over');
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+        }
+    });
+    // Cleanup drag visual helper classes
+    document.addEventListener('dragend', () => {
+        document.querySelector('.drag-over')?.classList.remove('drag-over');
+    });
+    document.addEventListener('dragleave', () => {
+        document.querySelector('.drag-over')?.classList.remove('drag-over');
+    });
+    // Drop event handler with logic for parent-child and project reassignment updates
+    document.addEventListener('drop', async (event) => {
+        const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
+        // Remove tasks that are children of others in dragged tasks (keep only top-level dragged)
+        let topLevelDraggedIds = [...draggedTaskIds];
+        for (const id of draggedTaskIds) {
+            const parents = await getAllParentTaskIds(id);
+            if (topLevelDraggedIds.some((otherId) => parents.includes(otherId))) {
+                topLevelDraggedIds = topLevelDraggedIds.filter((i) => i !== id);
+            }
+        }
+        const tr = event.target.closest('tbody tr');
+        const table = event.target.closest('table');
+        const projectMenu = event.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        if (tr) {
+            const targetTaskId = getTaskIdFromElement(tr);
+            await Promise.all(topLevelDraggedIds.map(async (draggedId) => {
+                const task = await fetchTaskById(draggedId);
+                if (!task || !targetTaskId)
+                    return;
+                const existingParentId = task.related_tasks.parenttask?.[0]?.id;
+                if (existingParentId) {
+                    // Remove old parent relation
+                    await new Promise((resolve) => GM_xmlhttpRequest({
+                        method: 'DELETE',
+                        url: `/api/v1/tasks/${draggedId}/relations/parenttask/${existingParentId}`,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${getJwtToken()}`
+                        },
+                        onload: () => resolve(null)
+                    }));
+                }
+                // Add new parent relation
+                await new Promise((resolve) => GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: `/api/v1/tasks/${draggedId}/relations`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${getJwtToken()}`
+                    },
+                    data: JSON.stringify({
+                        relation_kind: 'parenttask',
+                        other_task_id: targetTaskId
+                    }),
+                    onload: () => resolve(null)
+                }));
+            }));
+            clearTaskCache();
+            await fetchTasksByIds(getAllTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
+        else if (table) {
+            // Dropped on the table body (no target task)
+            await Promise.all(topLevelDraggedIds.map(async (id) => {
+                const task = await fetchTaskById(id);
+                if (!task)
+                    return;
+                const oldParentId = task.related_tasks.parenttask?.[0]?.id;
+                if (oldParentId) {
+                    await new Promise((resolve) => GM_xmlhttpRequest({
+                        method: 'DELETE',
+                        url: `/api/v1/tasks/${id}/relations/parenttask/${oldParentId}`,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${getJwtToken()}`
+                        },
+                        onload: () => resolve(null)
+                    }));
+                }
+            }));
+            clearTaskCache();
+            await fetchTasksByIds(getAllTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
+        else if (projectMenu) {
+            const newProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
+            await Promise.all(draggedTaskIds.map((id) => new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `/api/v1/tasks/${id}`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${getJwtToken()}`
+                    },
+                    data: JSON.stringify({
+                        project_id: newProjectId
+                    }),
+                    onload: () => resolve()
+                });
+            })));
+            draggedRows.forEach((row) => row.remove());
+            clearTaskCache();
+            await fetchTasksByIds(getAllTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
+    });
+    //---------------- Mutation Observer to Watch Row Class Changes ----------------
+    /**
+     * Initializes MutationObserver to watch for class changes on table rows.
+     * Toggles draggable attribute when bulk-selected class is added or removed.
+     */
+    function initRowSelectionMutationObserver() {
+        const observer = new MutationObserver((mutationRecords) => {
+            for (const mutation of mutationRecords) {
+                if (!isClassMutation(mutation))
+                    continue;
+                const target = mutation.target;
+                if (!(target instanceof HTMLTableRowElement))
+                    continue;
+                handleRowClassAttributeChange(target, mutation.oldValue);
+            }
+        });
+        observer.observe(document.body, {
+            subtree: true,
+            attributes: true,
+            attributeOldValue: true,
+            attributeFilter: ['class']
+        });
+    }
+    /** Checks if a mutation record is a class attribute change */
+    function isClassMutation(mutation) {
+        return (mutation.type === 'attributes' && mutation.attributeName === 'class');
+    }
+    /**
+     * Handles the change of class attribute on a row and toggles draggable attribute.
+     * @param row Table row element
+     * @param oldClassValue The previous class attribute value
+     */
+    function handleRowClassAttributeChange(row, oldClassValue) {
+        const currentlySelected = row.classList.contains('bulk-selected');
+        const previouslySelected = oldClassValue?.includes('bulk-selected') ?? false;
+        if (currentlySelected !== previouslySelected) {
+            if (currentlySelected) {
+                row.setAttribute('draggable', 'true');
+            }
+            else {
+                row.removeAttribute('draggable');
+            }
+        }
+    }
+    /**
+     * Retrieves hierarchical level of task defined by parent task depth.
+     * 0 = top-level, 1 = child, etc.
+     * @param taskId Task ID
+     * @returns Promise resolving to level number (0 or more)
+     */
+    async function getTaskIndentLevel(taskId) {
+        let level = 0;
+        let currentTaskId = taskId;
+        const baseTask = await fetchTaskById(currentTaskId);
+        if (!baseTask)
+            return level;
+        while (true) {
+            const currentTask = await fetchTaskById(currentTaskId);
+            if (!currentTask.related_tasks.parenttask?.length ||
+                currentTask.related_tasks.parenttask[0].project_id !==
+                    baseTask.project_id) {
+                break;
+            }
+            currentTaskId = currentTask.related_tasks.parenttask[0].id;
+            level++;
+        }
+        return level;
+    }
+    /**
+     * Clears the task cache.
+     */
+    function clearTaskCache() {
+        for (const key in taskCache) {
+            delete taskCache[key];
+        }
+    }
+    /**
+     * Reorders task rows to reflect hierarchical task relationships visually.
+     * Uses task level (indentation) to position rows below parent rows.
+     * @param rows NodeList of table row elements
+     */
+    async function reorderTaskRows(rows) {
+        const rowData = await Promise.all([...rows].map(async (row) => {
+            const task = await fetchTaskById(getTaskIdByRow(row));
+            const level = await getTaskIndentLevel(task.id);
+            return { row, level };
+        }));
+        // Sort rows by level ascending, reverse to maintain order of insertion after
+        rowData.reverse().sort((a, b) => a.level - b.level);
+        for (const { row, level } of rowData) {
+            if (level !== 0) {
+                const task = await fetchTaskById(getTaskIdByRow(row));
+                const parentId = task.related_tasks.parenttask[0].id;
+                const parentRow = [...rows].find((r) => getTaskIdByRow(r) === parentId);
+                if (parentRow) {
+                    parentRow.insertAdjacentElement('afterend', row);
+                }
+            }
+            row.style.setProperty('--level', level.toString());
+        }
+    }
+    /**
+     * Retrieves all parent task IDs for a given task, climbing up until no parent.
+     * @param taskId Task ID
+     * @returns Promise resolving to array of parent task IDs ordered from closest to farthest
+     */
+    async function getAllParentTaskIds(taskId) {
+        let currentTaskId = taskId;
+        const parentIds = [];
+        while (true) {
+            const task = await fetchTaskById(currentTaskId);
+            if (!task.related_tasks?.parenttask?.length)
+                break;
+            const parentId = task.related_tasks.parenttask[0].id;
+            parentIds.push(parentId);
+            currentTaskId = parentId;
+        }
+        return parentIds;
+    }
+    //---------------- General Enhancement and UI Setup ----------------
+    /**
+     * Enhances all supported table columns by applying their respective feature enhancement functions.
+     */
+    function enhanceAllTableColumns() {
+        enhanceEditableTitles();
+        enhanceDoneColumn();
+        enhancePriorityColumn();
+        enhanceDueDateColumn();
+        enhanceStartDateColumn();
+        enhanceEndDateColumn();
+        enhanceProgressColumn();
+        enhanceAssigneesColumn();
+        enhanceLabelsColumn();
+    }
+    /** Fixes horizontal overflow issue for tables inside scrollable containers */
+    function fixTableHorizontalOverflow() {
+        const overflowContainer = document
+            .querySelector('table')
+            ?.closest('.has-horizontal-overflow');
+        if (overflowContainer) {
+            overflowContainer.style.overflow = 'visible';
+        }
+    }
+    /** Handles DOM changes by re-enhancing table elements and ensuring proper ordering */
+    async function handleDomMutations(observer) {
+        if (!document.querySelector('table tbody tr td')) {
+            return; // No table detected, skip
+        }
+        if (document.querySelector('table tbody tr td') &&
+            !document.querySelector('tr[style*="--level"]')) {
+            // Cache clearing and fetching tasks for first load or refresh
+            clearTaskCache();
+            await fetchTasksByIds(getAllTaskIdsFromTable());
+            const rows = document.querySelectorAll('tbody tr');
+            await reorderTaskRows(rows);
+        }
+        observer.disconnect();
+        enhanceAllTableColumns();
+        fixTableHorizontalOverflow();
+        observer.observe(document.body, observerConfig);
+    }
+    // Mutation observer configuration for attributes, childList and subtree watching
+    const observerConfig = { attributes: true, childList: true, subtree: true };
+    // Create MutationObserver instance
+    const mutationObserver = new MutationObserver((mutations, observer) => {
+        handleDomMutations(observer);
+    });
+    // Start observing DOM for changes
+    mutationObserver.observe(document.body, observerConfig);
+    initRowSelectionMutationObserver();
+    //---------------- Misc ----------------
+    /**
+     * Creates a debounced version of a function; delays execution until after specified delay.
+     * @param func Function to debounce
+     * @param delay Delay in milliseconds
+     * @returns Debounced function
+     */
+    function debounce(func, delay = 300) {
+        let timeoutId;
+        return function (...args) {
+            if (timeoutId)
+                clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => func.apply(this, args), delay);
+        };
+    }
+    /**
+     * Creates a throttled version of a function; prevents frequent calls.
+     * @param func Function to throttle
+     * @param limit Minimum time between calls
+     * @returns Throttled function
+     */
+    function throttle(func, limit) {
+        let inThrottle = false;
+        return function (...args) {
+            if (!inThrottle) {
+                func.apply(this, args);
+                inThrottle = true;
+                setTimeout(() => (inThrottle = false), limit);
+            }
+        };
+    }
+    // Add necessary CSS styles for the enhanced UI elements
     GM_addStyle(`
         .edit-title {
             border: none;
@@ -1508,7 +1985,7 @@
             cursor: pointer;
         }
         .bulk-selected {
-            background-color: var(--table-row-hover-background-color)
+            background-color: var(--table-row-hover-background-color);
         }
         .drag-over {
             outline: 2px dashed #007bff;
@@ -1529,348 +2006,4 @@
             padding-left: calc(0.75em + 20px * var(--level));
         }
     `);
-    let draggedRows = [];
-    document.addEventListener('click', (e) => {
-        const tr = e.target.closest('tr');
-        const tbody = tr?.closest('tbody');
-        if (!tr || !tbody)
-            return;
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        if (e.target
-            .closest('.bulk-edit')
-            ?.closest('.bulk-selected')) {
-            return;
-        }
-        else if (!e.target.closest('.bulk-edit')) {
-            e.preventDefault();
-        }
-        const lastClicked = tbody.querySelector('tr.last-clicked');
-        if (e.shiftKey && lastClicked) {
-            rows.forEach((r) => r.classList.remove('bulk-selected'));
-            const start = rows.indexOf(lastClicked);
-            const end = rows.indexOf(tr);
-            const [s, e_] = [start, end].sort((a, b) => a - b);
-            for (let i = s; i <= e_; i++) {
-                rows[i].classList.add('bulk-selected');
-            }
-        }
-        else if (e.ctrlKey || e.metaKey) {
-            tr.classList.toggle('bulk-selected');
-        }
-        else {
-            rows.forEach((r) => r.classList.remove('bulk-selected'));
-            tr.classList.add('bulk-selected');
-        }
-        // Update last-clicked
-        rows.forEach((r) => r.classList.remove('last-clicked'));
-        tr.classList.add('last-clicked');
-    });
-    // --- Drag & Drop ---
-    document.addEventListener('dragstart', (e) => {
-        const tr = e.target.closest('tr');
-        const tbody = tr?.closest('tbody');
-        if (!tr || !tbody || !tr.classList.contains('bulk-selected')) {
-            e.preventDefault();
-            return;
-        }
-        draggedRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', 'dragging');
-    });
-    document.addEventListener('dragover', async (e) => {
-        const tr = e.target.closest('tbody tr');
-        const table = e.target.closest('table');
-        const projectMenu = e.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
-        if (tr && !tr.classList.contains('bulk-selected')) {
-            const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
-            const allParentTargetTaskIds = await getAllParentTaskIds(getTaskIdFromElement(tr));
-            for (const taskId of allParentTargetTaskIds) {
-                if (draggedTaskIds.includes(taskId)) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'none';
-                    return;
-                }
-            }
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            tr.classList.add('drag-over');
-        }
-        else if (table && !tr) {
-            table.classList.add('drag-over');
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        }
-        else if (projectMenu &&
-            parseInt(projectMenu?.href?.split('/').pop() ?? '0') > 0 &&
-            parseInt(projectMenu?.href?.split('/').pop() ?? '0') !==
-                getProjectId()) {
-            projectMenu.classList.add('drag-over');
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        }
-    });
-    document.addEventListener('dragend', (e) => {
-        document.querySelector('.drag-over')?.classList.remove('drag-over');
-    });
-    document.addEventListener('dragleave', (e) => {
-        document.querySelector('.drag-over')?.classList.remove('drag-over');
-    });
-    document.addEventListener('drop', async (e) => {
-        const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
-        let topLevelIds = draggedTaskIds;
-        for (const id of topLevelIds) {
-            const allParentTaskIds = await getAllParentTaskIds(id);
-            if (topLevelIds.some((id) => allParentTaskIds.includes(id))) {
-                topLevelIds = topLevelIds.filter((currentId) => id !== currentId);
-            }
-        }
-        const tr = e.target.closest('tbody tr');
-        const table = e.target.closest('table');
-        const projectMenu = e.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
-        if (tr) {
-            const targetTaskId = getTaskIdFromElement(tr);
-            await Promise.all(topLevelIds.map(async (id) => {
-                const task = await fetchTaskById(id);
-                if (!task || !targetTaskId)
-                    return;
-                const parentTaskId = task.related_tasks.parenttask?.[0]?.id;
-                if (parentTaskId) {
-                    await new Promise((resolve) => GM_xmlhttpRequest({
-                        method: 'DELETE',
-                        url: `/api/v1/tasks/${id}/relations/parenttask/${parentTaskId}`,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${getJwtToken()}`
-                        },
-                        onload: () => {
-                            resolve(null);
-                        }
-                    }));
-                }
-                await new Promise((resolve) => GM_xmlhttpRequest({
-                    method: 'PUT',
-                    url: `/api/v1/tasks/${id}/relations`,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${getJwtToken()}`
-                    },
-                    data: JSON.stringify({
-                        relation_kind: 'parenttask',
-                        other_task_id: targetTaskId
-                    }),
-                    onload: () => {
-                        resolve(null);
-                    }
-                }));
-            }));
-            clearTaskCache();
-            await fetchTasksByIds(getTaskIdsFromTable());
-            await reorderTaskRows(document.querySelectorAll('tbody tr'));
-        }
-        else if (table) {
-            await Promise.all(topLevelIds.map(async (id) => {
-                const task = await fetchTaskById(id);
-                if (!task)
-                    return;
-                const parentTaskId = task.related_tasks.parenttask?.[0]?.id;
-                if (parentTaskId) {
-                    await new Promise((resolve) => GM_xmlhttpRequest({
-                        method: 'DELETE',
-                        url: `/api/v1/tasks/${id}/relations/parenttask/${parentTaskId}`,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${getJwtToken()}`
-                        },
-                        onload: () => {
-                            resolve(null);
-                        }
-                    }));
-                }
-            }));
-            clearTaskCache();
-            await fetchTasksByIds(getTaskIdsFromTable());
-            await reorderTaskRows(document.querySelectorAll('tbody tr'));
-        }
-        else if (projectMenu) {
-            const targetProjectId = parseInt(projectMenu?.href?.split('/').pop() ?? '0');
-            await Promise.all(draggedTaskIds.map(async (id) => {
-                await new Promise((resolve) => GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: `/api/v1/tasks/${id}`,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${getJwtToken()}`
-                    },
-                    data: JSON.stringify({
-                        project_id: targetProjectId
-                    }),
-                    onload: () => {
-                        resolve(null);
-                    }
-                }));
-            }));
-            draggedRows.forEach((row) => row.remove());
-            clearTaskCache();
-            await fetchTasksByIds(getTaskIdsFromTable());
-            await reorderTaskRows(document.querySelectorAll('tbody tr'));
-        }
-    });
-    /**
-     * Initialize a MutationObserver to watch for class changes on <tr> elements.
-     * Specifically toggles the "draggable" attribute when the "bulk-selected" class changes.
-     */
-    function initRowSelectionObserver() {
-        const observer = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                if (!isClassAttributeChange(mutation))
-                    continue;
-                const target = mutation.target;
-                if (!(target instanceof HTMLTableRowElement))
-                    continue;
-                handleRowClassChange(target, mutation.oldValue);
-            }
-        });
-        observer.observe(document.body, {
-            subtree: true,
-            attributes: true,
-            attributeOldValue: true,
-            attributeFilter: ['class']
-        });
-    }
-    /**
-     * Check if the mutation is a class attribute change.
-     */
-    function isClassAttributeChange(mutation) {
-        return (mutation.type === 'attributes' && mutation.attributeName === 'class');
-    }
-    /**
-     * Handle changes to a row's class attribute.
-     * Toggles the draggable attribute based on whether "bulk-selected" is added or removed.
-     */
-    function handleRowClassChange(row, oldClassValue) {
-        const hasClass = row.classList.contains('bulk-selected');
-        const hadClass = oldClassValue?.includes('bulk-selected') ?? false;
-        // Apply changes only if there is a real difference
-        if (hasClass !== hadClass) {
-            if (hasClass) {
-                row.setAttribute('draggable', 'true');
-            }
-            else {
-                row.removeAttribute('draggable');
-            }
-        }
-    }
-    async function getTaskLevelById(taskId) {
-        let level = 0;
-        let currentTaskId = taskId;
-        const task = await fetchTaskById(currentTaskId);
-        while (1) {
-            const currentTask = await fetchTaskById(currentTaskId);
-            if (!currentTask.related_tasks?.parenttask?.length ||
-                currentTask.related_tasks?.parenttask[0].project_id !==
-                    task.project_id)
-                break;
-            currentTaskId = currentTask.related_tasks.parenttask[0].id;
-            level++;
-        }
-        return level;
-    }
-    // Observer configuration
-    const observerConfig = { attributes: true, childList: true, subtree: true };
-    /**
-     * Clear the task cache
-     */
-    function clearTaskCache() {
-        for (const key in taskCache) {
-            delete taskCache[key];
-        }
-    }
-    /**
-     * Sort rows by task level and insert them in hierarchical order
-     */
-    async function reorderTaskRows(rows) {
-        const sortRows = (await Promise.all(Array.from(rows).map(async (row) => {
-            const task = await fetchTaskById(getTaskIdByTr(row));
-            const level = await getTaskLevelById(task.id);
-            return { row, level };
-        })))
-            .reverse()
-            .sort((a, b) => a.level - b.level);
-        for (const row of sortRows) {
-            if (row.level !== 0) {
-                const task = await fetchTaskById(getTaskIdByTr(row.row));
-                const parentRow = Array.from(rows).find((r) => {
-                    const id = getTaskIdByTr(r);
-                    return id === task.related_tasks.parenttask[0].id;
-                });
-                if (parentRow) {
-                    parentRow.insertAdjacentElement('afterend', row.row);
-                }
-            }
-            row.row.style.setProperty('--level', row.level.toString());
-        }
-    }
-    async function getAllParentTaskIds(taskId) {
-        let currentTaskId = taskId;
-        const parentTaskIds = [];
-        while (1) {
-            const task = await fetchTaskById(currentTaskId);
-            if (!task.related_tasks?.parenttask?.length)
-                break;
-            parentTaskIds.push(task.related_tasks.parenttask[0].id);
-            currentTaskId = task.related_tasks.parenttask[0].id;
-        }
-        return parentTaskIds;
-    }
-    /**
-     * Enhance table columns with custom features
-     */
-    function enhanceTableColumns() {
-        enhanceEditableTitles();
-        enhanceDoneColumn();
-        enhancePriorityColumn();
-        enhanceDueDateColumn();
-        enhanceStartDateColumn();
-        enhanceEndDateColumn();
-        enhanceProgressColumn();
-        enhanceAssigneesColumn();
-        enhanceLabelsColumn();
-    }
-    /**
-     * Ensure horizontal overflow is visible for the table
-     */
-    function fixHorizontalOverflow() {
-        const hasHorizontalOverflow = document
-            .querySelector('table')
-            ?.closest('.has-horizontal-overflow');
-        if (hasHorizontalOverflow) {
-            hasHorizontalOverflow.style.overflow = 'visible';
-        }
-    }
-    /**
-     * Handle detected DOM changes
-     */
-    async function handleDomChanges(observer) {
-        if (!document.querySelector('table tbody tr td')) {
-            return; // No table detected
-        }
-        if (document.querySelector('table tbody tr td') &&
-            !document.querySelector('tr[style*="--level"]')) {
-            clearTaskCache();
-            await fetchTasksByIds(getTaskIdsFromTable());
-            const rows = document.querySelectorAll('tbody tr');
-            await reorderTaskRows(rows);
-        }
-        observer.disconnect();
-        enhanceTableColumns();
-        fixHorizontalOverflow();
-        // Resume observing
-        observer.observe(document.body, observerConfig);
-    }
-    // Create and start observer
-    const observer = new MutationObserver((mutations, obs) => {
-        handleDomChanges(obs);
-    });
-    observer.observe(document.body, observerConfig);
-    initRowSelectionObserver();
 })();
