@@ -575,51 +575,37 @@
         }
         cell.innerHTML = '';
         cell.appendChild(input);
-        input.addEventListener('change', () => handleDateChange(cell, input, dateField));
+        input.addEventListener('change', () => handleDateChange(cell, input, className, dateField));
     }
     /**
      * Handle change event for a date input (single or bulk update).
      */
-    function handleDateChange(cell, input, dateField) {
+    function handleDateChange(cell, input, inputClassName, dateField) {
         const tr = cell.closest('tr');
         if (!tr)
             return;
         const newDateUTC = new Date(input.value).toISOString();
-        if (tr.classList.contains('bulk-selected')) {
-            const rows = Array.from(document.querySelectorAll('tbody tr.bulk-selected'));
-            const taskIds = rows.map(getTaskIdByTr);
-            // Bulk API request
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: `/api/v1/tasks/bulk`,
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({
-                    [dateField]: newDateUTC,
-                    task_ids: taskIds
-                })
-            });
-            // Update UI for all bulk-selected rows
-            rows.forEach((row) => {
-                const rowInput = row.querySelector(`.${input.className}`);
-                if (rowInput)
-                    rowInput.value = input.value;
-            });
-        }
-        else {
-            const taskId = getTaskIdFromElement(cell);
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: `/api/v1/tasks/${taskId}`,
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({ [dateField]: newDateUTC })
-            });
-        }
+        const rows = Array.from(document.querySelectorAll('tbody tr.bulk-selected'));
+        const taskIds = rows.map(getTaskIdByTr);
+        // Bulk API request
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `/api/v1/tasks/bulk`,
+            headers: {
+                Authorization: `Bearer ${getJwtToken()}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                [dateField]: newDateUTC,
+                task_ids: taskIds
+            })
+        });
+        // Update UI for all bulk-selected rows
+        rows.forEach((row) => {
+            const rowInput = row.querySelector(`.${inputClassName}`);
+            if (rowInput)
+                rowInput.value = input.value;
+        });
     }
     /**
      * Wrapper functions for specific columns
@@ -1304,13 +1290,8 @@
             return;
         const cacheKey = query;
         // ✅ Use cache if available
-        if (assigneeSearchCache.has(cacheKey)) {
+        if (labelSearchCache.has(cacheKey)) {
             renderLabels(searchResults, labelSearchCache.get(cacheKey));
-            if (!labelSearchCache
-                .get(cacheKey)
-                ?.some((label) => label.title.trim() === query.trim())) {
-                updateAndRefreshLabels();
-            }
             return;
         }
         // Otherwise fetch from API
@@ -1529,7 +1510,7 @@
         .bulk-selected {
             background-color: var(--table-row-hover-background-color)
         }
-        tbody tr.drag-over {
+        .drag-over {
             outline: 2px dashed #007bff;
         }
         tbody td:hover {
@@ -1545,11 +1526,10 @@
             background-color: var(--table-row-hover-background-color);
         }
         tbody tr td:first-child {
-            padding-left: calc(20px * var(--level));
+            padding-left: calc(0.75em + 20px * var(--level));
         }
     `);
     let draggedRows = [];
-    let lastDragOverTr = null;
     document.addEventListener('click', (e) => {
         const tr = e.target.closest('tr');
         const tbody = tr?.closest('tbody');
@@ -1597,48 +1577,143 @@
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', 'dragging');
     });
-    document.addEventListener('dragover', (e) => {
-        const tr = e.target.closest('tr');
-        if (!tr ||
-            !tr.closest('tbody') ||
-            tr.classList.contains('bulk-selected'))
-            return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (lastDragOverTr && lastDragOverTr !== tr) {
-            lastDragOverTr.classList.remove('drag-over');
+    document.addEventListener('dragover', async (e) => {
+        const tr = e.target.closest('tbody tr');
+        const table = e.target.closest('table');
+        const projectMenu = e.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        if (tr && !tr.classList.contains('bulk-selected')) {
+            const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
+            const allParentTargetTaskIds = await getAllParentTaskIds(getTaskIdFromElement(tr));
+            for (const taskId of allParentTargetTaskIds) {
+                if (draggedTaskIds.includes(taskId)) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+            }
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            tr.classList.add('drag-over');
         }
-        tr.classList.add('drag-over');
-        lastDragOverTr = tr;
+        else if (table && !tr) {
+            table.classList.add('drag-over');
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+        else if (projectMenu &&
+            parseInt(projectMenu?.href?.split('/').pop() ?? '0') > 0 &&
+            parseInt(projectMenu?.href?.split('/').pop() ?? '0') !==
+                getProjectId()) {
+            projectMenu.classList.add('drag-over');
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
     });
     document.addEventListener('dragend', (e) => {
-        if (lastDragOverTr) {
-            lastDragOverTr.classList.remove('drag-over');
-            lastDragOverTr = null;
-        }
+        document.querySelector('.drag-over')?.classList.remove('drag-over');
     });
     document.addEventListener('dragleave', (e) => {
-        const tr = e.target.closest('tr');
-        if (tr && tr.classList.contains('drag-over')) {
-            tr.classList.remove('drag-over');
-            lastDragOverTr = null;
-        }
+        document.querySelector('.drag-over')?.classList.remove('drag-over');
     });
-    document.addEventListener('drop', (e) => {
-        const targetTr = e.target.closest('tr');
-        const tbody = targetTr?.closest('tbody');
-        if (!targetTr || !tbody)
-            return;
-        e.preventDefault();
-        // ถ้า targetTr อยู่ใน selection bulk-selected ของตัวเอง → ไม่ทำอะไร
-        if (targetTr.classList.contains('bulk-selected'))
-            return;
-        draggedRows
-            .slice()
-            .reverse()
-            .forEach((row) => {
-            tbody.insertBefore(row, targetTr.nextElementSibling);
-        });
+    document.addEventListener('drop', async (e) => {
+        const draggedTaskIds = draggedRows.map(getTaskIdFromElement);
+        let topLevelIds = draggedTaskIds;
+        for (const id of topLevelIds) {
+            const allParentTaskIds = await getAllParentTaskIds(id);
+            if (topLevelIds.some((id) => allParentTaskIds.includes(id))) {
+                topLevelIds = topLevelIds.filter((currentId) => id !== currentId);
+            }
+        }
+        const tr = e.target.closest('tbody tr');
+        const table = e.target.closest('table');
+        const projectMenu = e.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        if (tr) {
+            const targetTaskId = getTaskIdFromElement(tr);
+            await Promise.all(topLevelIds.map(async (id) => {
+                const task = await fetchTaskById(id);
+                if (!task || !targetTaskId)
+                    return;
+                const parentTaskId = task.related_tasks.parenttask?.[0]?.id;
+                if (parentTaskId) {
+                    await new Promise((resolve) => GM_xmlhttpRequest({
+                        method: 'DELETE',
+                        url: `/api/v1/tasks/${id}/relations/parenttask/${parentTaskId}`,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${getJwtToken()}`
+                        },
+                        onload: () => {
+                            resolve(null);
+                        }
+                    }));
+                }
+                await new Promise((resolve) => GM_xmlhttpRequest({
+                    method: 'PUT',
+                    url: `/api/v1/tasks/${id}/relations`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${getJwtToken()}`
+                    },
+                    data: JSON.stringify({
+                        relation_kind: 'parenttask',
+                        other_task_id: targetTaskId
+                    }),
+                    onload: () => {
+                        resolve(null);
+                    }
+                }));
+            }));
+            clearTaskCache();
+            await fetchTasksByIds(getTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
+        else if (table) {
+            await Promise.all(topLevelIds.map(async (id) => {
+                const task = await fetchTaskById(id);
+                if (!task)
+                    return;
+                const parentTaskId = task.related_tasks.parenttask?.[0]?.id;
+                if (parentTaskId) {
+                    await new Promise((resolve) => GM_xmlhttpRequest({
+                        method: 'DELETE',
+                        url: `/api/v1/tasks/${id}/relations/parenttask/${parentTaskId}`,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${getJwtToken()}`
+                        },
+                        onload: () => {
+                            resolve(null);
+                        }
+                    }));
+                }
+            }));
+            clearTaskCache();
+            await fetchTasksByIds(getTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
+        else if (projectMenu) {
+            const targetProjectId = parseInt(projectMenu?.href?.split('/').pop() ?? '0');
+            await Promise.all(draggedTaskIds.map(async (id) => {
+                await new Promise((resolve) => GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `/api/v1/tasks/${id}`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${getJwtToken()}`
+                    },
+                    data: JSON.stringify({
+                        project_id: targetProjectId
+                    }),
+                    onload: () => {
+                        resolve(null);
+                    }
+                }));
+            }));
+            draggedRows.forEach((row) => row.remove());
+            clearTaskCache();
+            await fetchTasksByIds(getTaskIdsFromTable());
+            await reorderTaskRows(document.querySelectorAll('tbody tr'));
+        }
     });
     /**
      * Initialize a MutationObserver to watch for class changes on <tr> elements.
@@ -1688,19 +1763,20 @@
     async function getTaskLevelById(taskId) {
         let level = 0;
         let currentTaskId = taskId;
+        const task = await fetchTaskById(currentTaskId);
         while (1) {
-            const task = await fetchTaskById(currentTaskId);
-            if (!task.related_tasks?.parenttask?.length)
+            const currentTask = await fetchTaskById(currentTaskId);
+            if (!currentTask.related_tasks?.parenttask?.length ||
+                currentTask.related_tasks?.parenttask[0].project_id !==
+                    task.project_id)
                 break;
-            currentTaskId = task.related_tasks.parenttask[0].id;
+            currentTaskId = currentTask.related_tasks.parenttask[0].id;
             level++;
         }
         return level;
     }
     // Observer configuration
     const observerConfig = { attributes: true, childList: true, subtree: true };
-    let href = null;
-    let theadHtml = null;
     /**
      * Clear the task cache
      */
@@ -1717,7 +1793,9 @@
             const task = await fetchTaskById(getTaskIdByTr(row));
             const level = await getTaskLevelById(task.id);
             return { row, level };
-        }))).sort((a, b) => a.level - b.level);
+        })))
+            .reverse()
+            .sort((a, b) => a.level - b.level);
         for (const row of sortRows) {
             if (row.level !== 0) {
                 const task = await fetchTaskById(getTaskIdByTr(row.row));
@@ -1731,6 +1809,18 @@
             }
             row.row.style.setProperty('--level', row.level.toString());
         }
+    }
+    async function getAllParentTaskIds(taskId) {
+        let currentTaskId = taskId;
+        const parentTaskIds = [];
+        while (1) {
+            const task = await fetchTaskById(currentTaskId);
+            if (!task.related_tasks?.parenttask?.length)
+                break;
+            parentTaskIds.push(task.related_tasks.parenttask[0].id);
+            currentTaskId = task.related_tasks.parenttask[0].id;
+        }
+        return parentTaskIds;
     }
     /**
      * Enhance table columns with custom features
@@ -1764,25 +1854,18 @@
         if (!document.querySelector('table tbody tr td')) {
             return; // No table detected
         }
+        if (document.querySelector('table tbody tr td') &&
+            !document.querySelector('tr[style*="--level"]')) {
+            clearTaskCache();
+            await fetchTasksByIds(getTaskIdsFromTable());
+            const rows = document.querySelectorAll('tbody tr');
+            await reorderTaskRows(rows);
+        }
         observer.disconnect();
-        setTimeout(async () => {
-            const currentHref = window.location.href;
-            const currentTheadHtml = document.querySelector('thead')?.outerHTML ?? null;
-            // Only proceed if table header or URL has changed
-            if (href !== currentHref || theadHtml !== currentTheadHtml) {
-                clearTaskCache();
-                await fetchTasksByIds(getTaskIdsFromTable());
-                const rows = document.querySelectorAll('tbody tr');
-                await reorderTaskRows(rows);
-                // Save state for change detection
-                href = currentHref;
-                theadHtml = currentTheadHtml;
-            }
-            enhanceTableColumns();
-            fixHorizontalOverflow();
-            // Resume observing
-            observer.observe(document.body, observerConfig);
-        }, 100);
+        enhanceTableColumns();
+        fixHorizontalOverflow();
+        // Resume observing
+        observer.observe(document.body, observerConfig);
     }
     // Create and start observer
     const observer = new MutationObserver((mutations, obs) => {
