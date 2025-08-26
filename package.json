@@ -1,5 +1,9 @@
 {
-  "dependencies": {
-    "@types/tampermonkey": "^5.0.4"
-  }
+    "dependencies": {
+        "@types/node": "^24.3.0",
+        "@types/tampermonkey": "^5.0.4"
+    },
+    "scripts": {
+        "build": "bun ./cli/build.ts"
+    }
 }
