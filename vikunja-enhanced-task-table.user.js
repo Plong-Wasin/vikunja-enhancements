@@ -7,8 +7,8 @@
 // @match        https://try.vikunja.io/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
-// @updateURL    https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/refs/heads/main/vikunja-enhanced-task-table.user.js
-// @downloadURL  https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/refs/heads/main/vikunja-enhanced-task-table.user.js
+// @updateURL    https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/raw/refs/heads/main/vikunja-enhanced-task-table.user.js
+// @downloadURL  https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/raw/refs/heads/main/vikunja-enhanced-task-table.user.js
 // ==/UserScript==
 
 

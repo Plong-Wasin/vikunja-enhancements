@@ -20,7 +20,7 @@ Enhance the task management experience in Vikunja with this userscript. This scr
 ## Installation
 
 1. Install a userscript manager like [Tampermonkey](https://www.tampermonkey.net/) (available for Chrome, Firefox, Edge, Opera).
-2. Click the “Raw” or “Download” link to access the userscript file ([`vikunja-enhanced-task-table.user.js`](refs/heads/main/vikunja-enhanced-task-table.user.js)).
+2. Click the “Raw” or “Download” link to access the userscript file ([`vikunja-enhanced-task-table.user.js`](raw/refs/heads/main/vikunja-enhanced-task-table.user.js)).
 3. Open the userscript file in Tampermonkey or your userscript manager.
 4. Enable the script.
 5. Navigate to your Vikunja projects page (`https://your-vikunja-instance.com/projects/*`).
