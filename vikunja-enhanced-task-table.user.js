@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.1.0
+// @version      0.1.1
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -1549,6 +1549,9 @@
                         link.href = `/tasks/${newTask.id}`;
                         link.textContent = newTask.identifier;
                         identifyCell.appendChild(link);
+                        link.addEventListener('click', () => {
+                            window.location.href = link.href;
+                        });
                     }
                 }
                 const titleColPos = getVisibleColumnPosition(COLUMN_TITLE);
@@ -1559,6 +1562,9 @@
                         link.href = `/tasks/${newTask.id}`;
                         link.textContent = newTask.title;
                         titleCell.appendChild(link);
+                        link.addEventListener('click', () => {
+                            window.location.href = link.href;
+                        });
                     }
                 }
                 const tbody = document.querySelector('tbody');
@@ -1589,7 +1595,8 @@
         const target = event.target;
         const clickedRow = target.closest('tr');
         const tbody = clickedRow?.closest('tbody');
-        if (!clickedRow || !tbody)
+        const filterContainer = document.querySelector('.filter-container');
+        if (!clickedRow || !tbody || !filterContainer)
             return;
         const allRows = Array.from(tbody.querySelectorAll('tr'));
         // Ignore clicks within selected bulk-edit controls
@@ -1915,7 +1922,7 @@
      */
     async function handleDomMutations(observer) {
         debouncedUpdateTaskAddFormVisibility();
-        if (!document.querySelector('table tbody tr td')) {
+        if (!document.querySelector('table tbody tr td') || !document.querySelector('.filter-container')) {
             return;
         }
         observer.disconnect();

@@ -1921,6 +1921,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                         link.href = `/tasks/${newTask.id}`;
                         link.textContent = newTask.identifier;
                         identifyCell.appendChild(link);
+                        link.addEventListener('click', () => {
+                            window.location.href = link.href;
+                        });
                     }
                 }
 
@@ -1932,6 +1935,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                         link.href = `/tasks/${newTask.id}`;
                         link.textContent = newTask.title;
                         titleCell.appendChild(link);
+                        link.addEventListener('click', () => {
+                            window.location.href = link.href;
+                        });
                     }
                 }
 
@@ -1967,7 +1973,8 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const target = event.target as HTMLElement;
         const clickedRow = target.closest('tr');
         const tbody = clickedRow?.closest('tbody');
-        if (!clickedRow || !tbody) return;
+        const filterContainer = document.querySelector('.filter-container');
+        if (!clickedRow || !tbody || !filterContainer) return;
 
         const allRows = Array.from(tbody.querySelectorAll('tr'));
 
@@ -2342,7 +2349,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     async function handleDomMutations(observer: MutationObserver): Promise<void> {
         debouncedUpdateTaskAddFormVisibility();
 
-        if (!document.querySelector('table tbody tr td')) {
+        if (!document.querySelector('table tbody tr td') || !document.querySelector('.filter-container')) {
             return;
         }
         observer.disconnect();
