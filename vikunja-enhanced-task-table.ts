@@ -120,7 +120,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     'use strict';
 
     // Constants for task table column indices
-    const COLUMN_IDENTIFY = 0; // "#" or unspecified
+    const COLUMN_IDENTIFIER = 0; // "#" or unspecified
     const COLUMN_DONE = 1;
     const COLUMN_TITLE = 2;
     const COLUMN_PRIORITY = 3;
@@ -277,6 +277,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function setupEditableTitleCell(cell: HTMLTableCellElement): void {
         cell.style.cursor = 'pointer';
         cell.classList.add('enhanced');
+        cell.classList.add('column-title');
 
         const linkToTitle = cell.querySelector<HTMLAnchorElement>('a');
         if (!linkToTitle) return;
@@ -1921,7 +1922,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     newRow.appendChild(document.createElement('td'));
                 }
 
-                const identifyColPos = getVisibleColumnPosition(COLUMN_IDENTIFY);
+                const identifyColPos = getVisibleColumnPosition(COLUMN_IDENTIFIER);
                 if (identifyColPos >= 0) {
                     const identifyCell = newRow.children[identifyColPos];
                     if (identifyCell) {
@@ -2422,12 +2423,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     //---------------- Insert CSS Styles ----------------
 
     GM_addStyle(`
-        :root {
-            --mix-target: #d3d3d3;
-        }
-        :root.dark {
-            --mix-target: #485063;
-        }
         body:has(.columns-filter){
             .edit-title {
                 border: none;
@@ -2459,9 +2454,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             .search-results button:hover {
                 background-color: var(--table-row-hover-background-color);
             }
-            tbody tr td:first-child {
+            tbody tr td.column-title {
                 padding-left: calc(0.75em + 20px * var(--level, 0));
-            }
+            }  
             .is-done {
                 background: var(--success);
                 color: var(--white);
@@ -2470,15 +2465,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 line-height: 1;
                 border-radius: 4px;
                 text-align: center;
-            }
-            tr {
-                --max-level: 4;
-                --mix: calc(var(--level, 0) / var(--max-level) * 100%);
-                background-color: color-mix(
-                    in hsl,
-                    var(--card-background-color) calc(100% - var(--mix)),
-                    var(--mix-target) var(--mix)
-                );
             }
         }
     `);
