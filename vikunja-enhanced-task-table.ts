@@ -218,6 +218,14 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         return document.querySelectorAll<HTMLSpanElement>('.columns-filter span')[COLUMN_DONE]?.textContent ?? '';
     }
 
+    /****
+     * Retrieves the columns filter container element from the DOM.
+     * @returns The columns filter div element or null if not found.
+     */
+    function getColumnsFilterElement(): HTMLDivElement | null {
+        return document.querySelector('.columns-filter');
+    }
+
     /**
      * Fetches and caches user data. Returns the cached user info if it exists.
      */
@@ -1973,7 +1981,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const target = event.target as HTMLElement;
         const clickedRow = target.closest('tr');
         const tbody = clickedRow?.closest('tbody');
-        const filterContainer = document.querySelector('.filter-container');
+        const filterContainer = document.querySelector('.columns-filter');
         if (!clickedRow || !tbody || !filterContainer) return;
 
         const allRows = Array.from(tbody.querySelectorAll('tr'));
@@ -2008,6 +2016,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Drag start prepares list of dragged rows if they belong to bulk-selected class
     document.addEventListener('dragstart', (event: DragEvent) => {
+        if (!getColumnsFilterElement()) return;
         const draggedRow = (event.target as HTMLElement).closest('tr') as HTMLTableRowElement | null;
         const tbody = draggedRow?.closest('tbody');
         if (!draggedRow || !tbody || !draggedRow.classList.contains('bulk-selected')) {
@@ -2022,6 +2031,8 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Dragover event adds visual helpers and prevents illegal drops, checking for task hierarchy
     document.addEventListener('dragover', async (event) => {
+        if (!getColumnsFilterElement()) return;
+
         const targetRow = (event.target as HTMLElement).closest<HTMLTableRowElement>('tbody tr');
         const table = (event.target as HTMLElement).closest('table');
         const projectMenu = (event.target as HTMLElement).closest<HTMLAnchorElement>(
@@ -2067,6 +2078,8 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Drop event handles task hierarchy update, project moves, and parent task reassignment
     document.addEventListener('drop', async (event) => {
+        if (!getColumnsFilterElement()) return;
+
         const draggedTaskIds = currentlyDraggedRows.map(extractTaskIdFromElement);
         let topLevelDraggedIds = [...draggedTaskIds];
 
@@ -2349,7 +2362,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     async function handleDomMutations(observer: MutationObserver): Promise<void> {
         debouncedUpdateTaskAddFormVisibility();
 
-        if (!document.querySelector('table tbody tr td') || !document.querySelector('.filter-container')) {
+        if (!document.querySelector('table tbody tr td') || !document.querySelector('.columns-filter')) {
             return;
         }
         observer.disconnect();

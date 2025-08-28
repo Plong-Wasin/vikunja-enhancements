@@ -93,6 +93,13 @@
     function getDoneColumnLabelText() {
         return document.querySelectorAll('.columns-filter span')[COLUMN_DONE]?.textContent ?? '';
     }
+    /****
+     * Retrieves the columns filter container element from the DOM.
+     * @returns The columns filter div element or null if not found.
+     */
+    function getColumnsFilterElement() {
+        return document.querySelector('.columns-filter');
+    }
     /**
      * Fetches and caches user data. Returns the cached user info if it exists.
      */
@@ -1581,7 +1588,7 @@
         const target = event.target;
         const clickedRow = target.closest('tr');
         const tbody = clickedRow?.closest('tbody');
-        const filterContainer = document.querySelector('.filter-container');
+        const filterContainer = document.querySelector('.columns-filter');
         if (!clickedRow || !tbody || !filterContainer)
             return;
         const allRows = Array.from(tbody.querySelectorAll('tr'));
@@ -1613,6 +1620,8 @@
     });
     // Drag start prepares list of dragged rows if they belong to bulk-selected class
     document.addEventListener('dragstart', (event) => {
+        if (!getColumnsFilterElement())
+            return;
         const draggedRow = event.target.closest('tr');
         const tbody = draggedRow?.closest('tbody');
         if (!draggedRow || !tbody || !draggedRow.classList.contains('bulk-selected')) {
@@ -1625,6 +1634,8 @@
     });
     // Dragover event adds visual helpers and prevents illegal drops, checking for task hierarchy
     document.addEventListener('dragover', async (event) => {
+        if (!getColumnsFilterElement())
+            return;
         const targetRow = event.target.closest('tbody tr');
         const table = event.target.closest('table');
         const projectMenu = event.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
@@ -1665,6 +1676,8 @@
     });
     // Drop event handles task hierarchy update, project moves, and parent task reassignment
     document.addEventListener('drop', async (event) => {
+        if (!getColumnsFilterElement())
+            return;
         const draggedTaskIds = currentlyDraggedRows.map(extractTaskIdFromElement);
         let topLevelDraggedIds = [...draggedTaskIds];
         // Remove tasks that are children of other dragged tasks (only keep top-level)
@@ -1908,7 +1921,7 @@
      */
     async function handleDomMutations(observer) {
         debouncedUpdateTaskAddFormVisibility();
-        if (!document.querySelector('table tbody tr td') || !document.querySelector('.filter-container')) {
+        if (!document.querySelector('table tbody tr td') || !document.querySelector('.columns-filter')) {
             return;
         }
         observer.disconnect();
