@@ -1901,9 +1901,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             },
             data: JSON.stringify({ title, project_id: getProjectId() }),
             responseType: 'json',
-            onload: (resp) => {
+            onload: async (resp) => {
                 const newTask = resp.response as Task;
-                taskCache[newTask.id] = newTask;
+                taskCache[newTask.id] = await fetchTaskById(newTask.id);
 
                 const columnCount = document.querySelectorAll('thead tr > *').length;
                 const newRow = document.createElement('tr');

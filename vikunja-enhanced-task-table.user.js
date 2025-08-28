@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.1.1
+// @version      0.1.2
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -1532,9 +1532,9 @@
             },
             data: JSON.stringify({ title, project_id: getProjectId() }),
             responseType: 'json',
-            onload: (resp) => {
+            onload: async (resp) => {
                 const newTask = resp.response;
-                taskCache[newTask.id] = newTask;
+                taskCache[newTask.id] = await fetchTaskById(newTask.id);
                 const columnCount = document.querySelectorAll('thead tr > *').length;
                 const newRow = document.createElement('tr');
                 newRow.classList.add('new-task-row');
