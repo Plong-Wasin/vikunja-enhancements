@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.1.3
+// @version      0.2.0
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -1983,47 +1983,64 @@
     }
     //---------------- Insert CSS Styles ----------------
     GM_addStyle(`
-        .edit-title {
-            border: none;
-            background: transparent;
-            color: transparent;
-            transform: rotate(90deg);
-            pointer-events: none;
+        :root {
+            --mix-target: #d3d3d3;
         }
-        tbody tr:hover .editable-span.hidden + .edit-title {
-            pointer-events: all;
-            color: var(--button-hover-color);
-            cursor: pointer;
+        :root.dark {
+            --mix-target: #485063;
         }
-        .bulk-selected {
-            background-color: var(--table-row-hover-background-color);
-        }
-        .drag-over {
-            outline: 2px dashed var(--link-focus-border);
-        }
-        tbody td:hover {
-            background: var(--pre-background);
-        }
-        .hidden {
-            display: none;
-        }
-        .search-results button {
-            background-color: transparent;
-        }
-        .search-results button:hover {
-            background-color: var(--table-row-hover-background-color);
-        }
-        tbody tr td:first-child {
-            padding-left: calc(0.75em + 20px * var(--level, 0));
-        }
-        .is-done {
-            background: var(--success);
-            color: var(--white);
-            padding: .5rem;
-            font-weight: 700;
-            line-height: 1;
-            border-radius: 4px;
-            text-align: center;
+        body:has(.columns-filter){
+            .edit-title {
+                border: none;
+                background: transparent;
+                color: transparent;
+                transform: rotate(90deg);
+                pointer-events: none;
+            }
+            tbody tr:hover .editable-span.hidden + .edit-title {
+                pointer-events: all;
+                color: var(--button-hover-color);
+                cursor: pointer;
+            }
+            .bulk-selected {
+                background-color: var(--table-row-hover-background-color);
+            }
+            .drag-over {
+                outline: 2px dashed var(--link-focus-border);
+            }
+            tbody td:hover {
+                background: var(--pre-background);
+            }
+            .hidden {
+                display: none;
+            }
+            .search-results button {
+                background-color: transparent;
+            }
+            .search-results button:hover {
+                background-color: var(--table-row-hover-background-color);
+            }
+            tbody tr td:first-child {
+                padding-left: calc(0.75em + 20px * var(--level, 0));
+            }
+            .is-done {
+                background: var(--success);
+                color: var(--white);
+                padding: .5rem;
+                font-weight: 700;
+                line-height: 1;
+                border-radius: 4px;
+                text-align: center;
+            }
+            tr {
+                --max-level: 4;
+                --mix: calc(var(--level, 0) / var(--max-level) * 100%);
+                background-color: color-mix(
+                    in hsl,
+                    var(--card-background-color) calc(100% - var(--mix)),
+                    var(--mix-target) var(--mix)
+                );
+            }
         }
     `);
 })();
