@@ -142,7 +142,7 @@
     /**
      * Sets up a single task title cell for inline editing, adds edit button and handlers.
      */
-    function setupEditableTitleCell(cell) {
+    async function setupEditableTitleCell(cell) {
         cell.style.cursor = 'pointer';
         cell.classList.add('enhanced');
         cell.classList.add('column-title');
@@ -153,7 +153,35 @@
         const container = document.createElement('div');
         applyFlexContainerStyle(container);
         cell.appendChild(container);
-        container.appendChild(linkToTitle);
+        // wrapper สำหรับ title + icons
+        const titleWrapper = document.createElement('span');
+        titleWrapper.classList.add('title-wrapper');
+        // --- สร้าง span เก็บ text ไว้แยกจาก icon ---
+        const titleText = document.createElement('span');
+        titleText.classList.add('title-text');
+        titleText.textContent = linkToTitle.textContent ?? '';
+        linkToTitle.textContent = ''; // ล้าง text เดิมออก
+        linkToTitle.appendChild(titleText);
+        // append link
+        titleWrapper.appendChild(linkToTitle);
+        // === เพิ่ม icons แบบ SVG ถ้ามีไฟล์ ===
+        const task = await fetchTaskById(extractTaskIdFromElement(cell));
+        if (task.attachments) {
+            const fileIcon = document.createElement('span');
+            fileIcon.className = 'project-task-icon';
+            fileIcon.innerHTML = `
+            <svg class="svg-inline--fa fa-paperclip" data-prefix="fas" data-icon="paperclip" role="img" viewBox="0 0 512 512" aria-hidden="true"><path class="" fill="currentColor" d="M224.6 12.8c56.2-56.2 147.4-56.2 203.6 0s56.2 147.4 0 203.6l-164 164c-34.4 34.4-90.1 34.4-124.5 0s-34.4-90.1 0-124.5L292.5 103.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L185 301.3c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l164-164c31.2-31.2 31.2-81.9 0-113.1s-81.9-31.2-113.1 0l-164 164c-53.1 53.1-53.1 139.2 0 192.3s139.2 53.1 192.3 0L428.3 284.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L343.4 459.6c-78.1 78.1-204.7 78.1-282.8 0s-78.1-204.7 0-282.8l164-164z"></path></svg>`;
+            titleWrapper.appendChild(fileIcon);
+        }
+        // === เพิ่ม icons แบบ SVG ถ้ามี description ===
+        if (task.description) {
+            const descIcon = document.createElement('span');
+            descIcon.className = 'project-task-icon is-mirrored-rtl';
+            descIcon.innerHTML = `
+            <svg class="svg-inline--fa fa-align-left" data-prefix="fas" data-icon="align-left" role="img" viewBox="0 0 448 512" aria-hidden="true"><path class="" fill="currentColor" d="M288 64c0 17.7-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l224 0c17.7 0 32 14.3 32 32zm0 256c0 17.7-14.3 32-32 32L32 352c-17.7 0-32-14.3-32-32s14.3-32 32-32l224 0c17.7 0 32 14.3 32 32zM0 192c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 224c-17.7 0-32-14.3-32-32zM448 448c0 17.7-14.3 32-32 32L32 480c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"></path></svg>`;
+            titleWrapper.appendChild(descIcon);
+        }
+        container.appendChild(titleWrapper);
         const editableInputSpan = createContentEditableSpan();
         container.appendChild(editableInputSpan);
         const editButton = createEditButton(linkToTitle, editableInputSpan);
@@ -189,7 +217,8 @@
      */
     function activateEditMode(link, editableSpan) {
         editableSpan.textContent = link.textContent ?? '';
-        link.classList.add('hidden');
+        const textWrapper = link.closest('.title-wrapper');
+        textWrapper?.classList.add('hidden');
         editableSpan.classList.remove('hidden');
         focusContentEditableAtEnd(editableSpan);
     }
@@ -272,8 +301,9 @@
      * Restores the title cell UI: hides editing span and shows the link with text.
      */
     function restoreTitleView(link, editableSpan, text) {
+        const textWrapper = link.closest('.title-wrapper');
         link.textContent = text;
-        link.classList.remove('hidden');
+        textWrapper?.classList.remove('hidden');
         editableSpan.classList.add('hidden');
     }
     //---------------- Done Column Enhancements ----------------
@@ -1633,33 +1663,39 @@
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', 'dragging');
     });
-    // Dragover event adds visual helpers and prevents illegal drops, checking for task hierarchy
-    document.addEventListener('dragover', async (event) => {
+    // Dragover event adds visual helpers and prevents illegal drops, considering task hierarchy constraints
+    document.addEventListener('dragover', (event) => {
         if (!getColumnsFilterElement())
             return;
-        const targetRow = event.target.closest('tbody tr');
-        const table = event.target.closest('table');
-        const projectMenu = event.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        const target = event.target;
+        const table = target.closest('table');
+        const targetRow = target.closest('tbody tr');
+        const projectMenu = target.closest('a.base-button.list-menu-link[href^="/projects/"]');
         if (targetRow && !targetRow.classList.contains('bulk-selected')) {
-            const draggedTaskIds = currentlyDraggedRows.map(extractTaskIdFromElement);
-            const targetTaskParents = await getAllParentTaskIds(extractTaskIdFromElement(targetRow));
-            for (const parentId of targetTaskParents) {
-                if (draggedTaskIds.includes(parentId)) {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'none';
-                    return;
-                }
-            }
+            // When dragging over a non-selected row: allow drop and add visual indicator
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
             targetRow.classList.add('drag-over');
         }
-        else if (table && !targetRow) {
-            table.classList.add('drag-over');
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
+        else if (!targetRow) {
+            // When mouse hovers near (within 20px buffer) the table boundary (outside any row)
+            const realTable = table || target.querySelector('table');
+            if (realTable) {
+                const rect = realTable.getBoundingClientRect();
+                const buffer = 20;
+                const inExtendedZone = event.clientX >= rect.left - buffer &&
+                    event.clientX <= rect.right + buffer &&
+                    event.clientY >= rect.top - buffer &&
+                    event.clientY <= rect.bottom + buffer;
+                if (inExtendedZone) {
+                    realTable.classList.add('drag-over');
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                }
+            }
         }
         else if (projectMenu) {
+            // When dragging over a project menu link that is a different project: allow drop with indicator
             const pmProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
             if (pmProjectId > 0 && pmProjectId !== getProjectId()) {
                 projectMenu.classList.add('drag-over');
@@ -1675,23 +1711,40 @@
     document.addEventListener('dragleave', () => {
         document.querySelector('.drag-over')?.classList.remove('drag-over');
     });
-    // Drop event handles task hierarchy update, project moves, and parent task reassignment
+    // Drop event handles updating task hierarchy, project moves, and parent task reassignment on drop
     document.addEventListener('drop', async (event) => {
         if (!getColumnsFilterElement())
             return;
         const draggedTaskIds = currentlyDraggedRows.map(extractTaskIdFromElement);
         let topLevelDraggedIds = [...draggedTaskIds];
-        // Remove tasks that are children of other dragged tasks (only keep top-level)
+        // Filter only top-level dragged tasks (exclude those that are descendants of others)
         for (const id of draggedTaskIds) {
             const parentIds = await getAllParentTaskIds(id);
             if (topLevelDraggedIds.some((otherId) => parentIds.includes(otherId))) {
                 topLevelDraggedIds = topLevelDraggedIds.filter((i) => i !== id);
             }
         }
-        const targetRow = event.target.closest('tbody tr');
-        const table = event.target.closest('table');
-        const projectMenu = event.target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        const target = event.target;
+        const targetRow = target.closest('tbody tr');
+        let table = target.closest('table');
+        const projectMenu = target.closest('a.base-button.list-menu-link[href^="/projects/"]');
+        // If no table found directly at target, check if target contains a table in extended zone (buffer area)
+        if (!table) {
+            const realTable = target.querySelector('table');
+            if (realTable) {
+                const rect = realTable.getBoundingClientRect();
+                const buffer = 20;
+                const inExtendedZone = event.clientX >= rect.left - buffer &&
+                    event.clientX <= rect.right + buffer &&
+                    event.clientY >= rect.top - buffer &&
+                    event.clientY <= rect.bottom + buffer;
+                if (inExtendedZone) {
+                    table = realTable; // Treat as drop over the table
+                }
+            }
+        }
         if (targetRow) {
+            // Dropped on a table row: update parent task relation for dragged tasks
             const targetTaskId = extractTaskIdFromElement(targetRow);
             await Promise.all(topLevelDraggedIds.map(async (draggedId) => {
                 const draggedTask = await fetchTaskById(draggedId);
@@ -1732,6 +1785,7 @@
             await reorderTaskRows(document.querySelectorAll('tbody tr'));
         }
         else if (table) {
+            // Dropped on table or within buffer area: detach dragged tasks from old parents
             await Promise.all(topLevelDraggedIds.map(async (id) => {
                 const task = await fetchTaskById(id);
                 if (!task)
@@ -1756,6 +1810,7 @@
             await reorderTaskRows(document.querySelectorAll('tbody tr'));
         }
         else if (projectMenu) {
+            // Dropped on project menu link: move dragged tasks to new project
             const newProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
             await Promise.all(draggedTaskIds.map((id) => new Promise((resolve) => {
                 GM_xmlhttpRequest({
@@ -2012,6 +2067,13 @@
                 line-height: 1;
                 border-radius: 4px;
                 text-align: center;
+            }
+            .enhanced {
+                .text-wrapper {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                }
             }
         }
     `);
