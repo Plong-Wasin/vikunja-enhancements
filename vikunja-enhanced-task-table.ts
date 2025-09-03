@@ -287,21 +287,21 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         applyFlexContainerStyle(container);
         cell.appendChild(container);
 
-        // wrapper สำหรับ title + icons
+        // Wrapper for title and icons
         const titleWrapper = document.createElement('span');
         titleWrapper.classList.add('title-wrapper');
 
-        // --- สร้าง span เก็บ text ไว้แยกจาก icon ---
+        // Create span holding text separate from icons
         const titleText = document.createElement('span');
         titleText.classList.add('title-text');
         titleText.textContent = linkToTitle.textContent ?? '';
-        linkToTitle.textContent = ''; // ล้าง text เดิมออก
+        linkToTitle.textContent = '';
         linkToTitle.appendChild(titleText);
 
-        // append link
+        // Append link
         titleWrapper.appendChild(linkToTitle);
 
-        // === เพิ่ม icons แบบ SVG ถ้ามีไฟล์ ===
+        // Add attachment icon if attachments exist
         const task = await fetchTaskById(extractTaskIdFromElement(cell));
         if (task.attachments) {
             const fileIcon = document.createElement('span');
@@ -311,7 +311,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             titleWrapper.appendChild(fileIcon);
         }
 
-        // === เพิ่ม icons แบบ SVG ถ้ามี description ===
+        // Add description icon if description exists
         if (task.description) {
             const descIcon = document.createElement('span');
             descIcon.className = 'project-task-icon is-mirrored-rtl';
@@ -1662,14 +1662,15 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /**
      * Handles searching labels from API, caches results and triggers rendering.
      */
-    function handleLabelSearch(input: HTMLInputElement, menu: HTMLDivElement): void {
+    async function handleLabelSearch(input: HTMLInputElement, menu: HTMLDivElement): Promise<void> {
         const query = input.value.trim();
         const resultsContainer = menu.querySelector<HTMLDivElement>('.search-results');
         if (!resultsContainer) return;
 
         const cacheKey = query;
         if (labelSearchCache.has(cacheKey)) {
-            renderLabelSearchResults(resultsContainer, labelSearchCache.get(cacheKey)!);
+            await renderLabelSearchResults(resultsContainer, labelSearchCache.get(cacheKey)!);
+            insertCreateLabelButtonIfNeeded(resultsContainer, query);
             return;
         }
 
@@ -1681,11 +1682,96 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             onload: async (response) => {
                 const labels: Label[] = response.response || [];
                 labelSearchCache.set(cacheKey, labels);
-                renderLabelSearchResults(resultsContainer, labels);
+                await renderLabelSearchResults(resultsContainer, labels);
+                insertCreateLabelButtonIfNeeded(resultsContainer, query);
             }
         });
     }
 
+    /**
+     * Inserts a create-label button if the label text
+     * does not match any existing label and is non-empty.
+     */
+    function insertCreateLabelButtonIfNeeded(container: HTMLDivElement, labelText: string) {
+        const labelExists = Array.from(labelSearchCache.values()).some((labels) =>
+            labels.some((l) => l.title.trim() === labelText)
+        );
+        if (!labelExists && labelText) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            Object.assign(button.style, {
+                width: '100%',
+                border: 'none',
+                padding: '6px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+            });
+
+            button.innerHTML = `
+            <span>
+                <span class="tag search-result">
+                    <span>${labelText}</span>
+                </span>
+            </span>
+            <span class="hint-text" style="font-size:12px; color:#888;">Click to create</span>
+        `;
+
+            button.addEventListener('click', () => {
+                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                const tag = button.querySelector<HTMLSpanElement>('.tag');
+                if (tag) {
+                    tag.style.backgroundColor = color;
+                    tag.style.color = isHexColorLight(color.replace('#', '')) ? COLOR_DARK : COLOR_LIGHT;
+                }
+                const hint = button.querySelector<HTMLSpanElement>('.hint-text');
+                if (hint) hint.textContent = 'Click to add';
+                button.style.display = 'none';
+                GM_xmlhttpRequest({
+                    url: `/api/v1/labels`,
+                    method: 'PUT',
+                    headers: { Authorization: `Bearer ${getJwtToken()}`, 'Content-Type': 'application/json' },
+                    responseType: 'json',
+                    data: JSON.stringify({
+                        title: labelText,
+                        hex_color: color.replace('#', '')
+                    }),
+                    onload: async (r) => {
+                        const label: Label = r.response;
+                        button.dataset.labelId = label.id.toString();
+                        const bulkRows = document.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected');
+
+                        for (const row of bulkRows) {
+                            const taskId = extractTaskIdFromElement(row);
+
+                            taskCache[taskId].labels ??= [];
+
+                            GM_xmlhttpRequest({
+                                method: 'PUT',
+                                url: `/api/v1/tasks/${taskId}/labels`,
+                                headers: {
+                                    Authorization: `Bearer ${getJwtToken()}`,
+                                    'Content-Type': 'application/json'
+                                },
+                                data: JSON.stringify({ label_id: label.id }),
+                                onload: () => {
+                                    if (!taskCache[taskId].labels!.some((l) => l.id === label.id)) {
+                                        taskCache[taskId].labels!.push(label);
+                                    }
+                                    labelSearchCache.clear();
+                                    refreshLabelsUI();
+                                }
+                            });
+                        }
+                        labelSearchCache.clear();
+                    }
+                });
+            });
+            container.appendChild(button);
+        }
+    }
     /**
      * Renders label search results as buttons for selection.
      */
@@ -1727,7 +1813,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     <span>${label.title}</span>
                 </span>
             </span>
-            <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
+            <span class="hint-text" style="font-size:12px; color:#888;">Click to add</span>
         `;
 
         button.addEventListener('click', () => {
@@ -1810,7 +1896,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function sortLabelsAlphabetically(labels: Label[]): Promise<Label[]> {
         const user = await fetchCurrentUser();
-        const language = user.settings.language;
+        const language = user.settings.language || navigator.language;
         return [...labels].sort((a, b) => a.title.localeCompare(b.title, language, { ignorePunctuation: true }));
     }
 

@@ -153,18 +153,18 @@
         const container = document.createElement('div');
         applyFlexContainerStyle(container);
         cell.appendChild(container);
-        // wrapper สำหรับ title + icons
+        // Wrapper for title and icons
         const titleWrapper = document.createElement('span');
         titleWrapper.classList.add('title-wrapper');
-        // --- สร้าง span เก็บ text ไว้แยกจาก icon ---
+        // Create span holding text separate from icons
         const titleText = document.createElement('span');
         titleText.classList.add('title-text');
         titleText.textContent = linkToTitle.textContent ?? '';
-        linkToTitle.textContent = ''; // ล้าง text เดิมออก
+        linkToTitle.textContent = '';
         linkToTitle.appendChild(titleText);
-        // append link
+        // Append link
         titleWrapper.appendChild(linkToTitle);
-        // === เพิ่ม icons แบบ SVG ถ้ามีไฟล์ ===
+        // Add attachment icon if attachments exist
         const task = await fetchTaskById(extractTaskIdFromElement(cell));
         if (task.attachments) {
             const fileIcon = document.createElement('span');
@@ -173,7 +173,7 @@
             <svg class="svg-inline--fa fa-paperclip" data-prefix="fas" data-icon="paperclip" role="img" viewBox="0 0 512 512" aria-hidden="true"><path class="" fill="currentColor" d="M224.6 12.8c56.2-56.2 147.4-56.2 203.6 0s56.2 147.4 0 203.6l-164 164c-34.4 34.4-90.1 34.4-124.5 0s-34.4-90.1 0-124.5L292.5 103.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L185 301.3c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l164-164c31.2-31.2 31.2-81.9 0-113.1s-81.9-31.2-113.1 0l-164 164c-53.1 53.1-53.1 139.2 0 192.3s139.2 53.1 192.3 0L428.3 284.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L343.4 459.6c-78.1 78.1-204.7 78.1-282.8 0s-78.1-204.7 0-282.8l164-164z"></path></svg>`;
             titleWrapper.appendChild(fileIcon);
         }
-        // === เพิ่ม icons แบบ SVG ถ้ามี description ===
+        // Add description icon if description exists
         if (task.description) {
             const descIcon = document.createElement('span');
             descIcon.className = 'project-task-icon is-mirrored-rtl';
@@ -1317,14 +1317,15 @@
     /**
      * Handles searching labels from API, caches results and triggers rendering.
      */
-    function handleLabelSearch(input, menu) {
+    async function handleLabelSearch(input, menu) {
         const query = input.value.trim();
         const resultsContainer = menu.querySelector('.search-results');
         if (!resultsContainer)
             return;
         const cacheKey = query;
         if (labelSearchCache.has(cacheKey)) {
-            renderLabelSearchResults(resultsContainer, labelSearchCache.get(cacheKey));
+            await renderLabelSearchResults(resultsContainer, labelSearchCache.get(cacheKey));
+            insertCreateLabelButtonIfNeeded(resultsContainer, query);
             return;
         }
         GM_xmlhttpRequest({
@@ -1335,9 +1336,88 @@
             onload: async (response) => {
                 const labels = response.response || [];
                 labelSearchCache.set(cacheKey, labels);
-                renderLabelSearchResults(resultsContainer, labels);
+                await renderLabelSearchResults(resultsContainer, labels);
+                insertCreateLabelButtonIfNeeded(resultsContainer, query);
             }
         });
+    }
+    /**
+     * Inserts a create-label button if the label text
+     * does not match any existing label and is non-empty.
+     */
+    function insertCreateLabelButtonIfNeeded(container, labelText) {
+        const labelExists = Array.from(labelSearchCache.values()).some((labels) => labels.some((l) => l.title.trim() === labelText));
+        if (!labelExists && labelText) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            Object.assign(button.style, {
+                width: '100%',
+                border: 'none',
+                padding: '6px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+            });
+            button.innerHTML = `
+            <span>
+                <span class="tag search-result">
+                    <span>${labelText}</span>
+                </span>
+            </span>
+            <span class="hint-text" style="font-size:12px; color:#888;">Click to create</span>
+        `;
+            button.addEventListener('click', () => {
+                const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                const tag = button.querySelector('.tag');
+                if (tag) {
+                    tag.style.backgroundColor = color;
+                    tag.style.color = isHexColorLight(color.replace('#', '')) ? COLOR_DARK : COLOR_LIGHT;
+                }
+                const hint = button.querySelector('.hint-text');
+                if (hint)
+                    hint.textContent = 'Click to add';
+                button.style.display = 'none';
+                GM_xmlhttpRequest({
+                    url: `/api/v1/labels`,
+                    method: 'PUT',
+                    headers: { Authorization: `Bearer ${getJwtToken()}`, 'Content-Type': 'application/json' },
+                    responseType: 'json',
+                    data: JSON.stringify({
+                        title: labelText,
+                        hex_color: color.replace('#', '')
+                    }),
+                    onload: async (r) => {
+                        const label = r.response;
+                        button.dataset.labelId = label.id.toString();
+                        const bulkRows = document.querySelectorAll('tr.bulk-selected');
+                        for (const row of bulkRows) {
+                            const taskId = extractTaskIdFromElement(row);
+                            taskCache[taskId].labels ??= [];
+                            GM_xmlhttpRequest({
+                                method: 'PUT',
+                                url: `/api/v1/tasks/${taskId}/labels`,
+                                headers: {
+                                    Authorization: `Bearer ${getJwtToken()}`,
+                                    'Content-Type': 'application/json'
+                                },
+                                data: JSON.stringify({ label_id: label.id }),
+                                onload: () => {
+                                    if (!taskCache[taskId].labels.some((l) => l.id === label.id)) {
+                                        taskCache[taskId].labels.push(label);
+                                    }
+                                    labelSearchCache.clear();
+                                    refreshLabelsUI();
+                                }
+                            });
+                        }
+                        labelSearchCache.clear();
+                    }
+                });
+            });
+            container.appendChild(button);
+        }
     }
     /**
      * Renders label search results as buttons for selection.
@@ -1374,7 +1454,7 @@
                     <span>${label.title}</span>
                 </span>
             </span>
-            <span style="font-size:12px; color:#888;" class="hidden">Enter or click</span>
+            <span class="hint-text" style="font-size:12px; color:#888;">Click to add</span>
         `;
         button.addEventListener('click', () => {
             const bulkRows = document.querySelectorAll('tr.bulk-selected');
@@ -1445,7 +1525,7 @@
      */
     async function sortLabelsAlphabetically(labels) {
         const user = await fetchCurrentUser();
-        const language = user.settings.language;
+        const language = user.settings.language || navigator.language;
         return [...labels].sort((a, b) => a.title.localeCompare(b.title, language, { ignorePunctuation: true }));
     }
     /**
