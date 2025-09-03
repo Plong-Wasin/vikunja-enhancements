@@ -2457,6 +2457,16 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         return parentIds;
     }
 
+    function clearCache() {
+        Object.keys(taskCache).forEach((k) => delete taskCache[+k]);
+        Object.keys(avatarCache).forEach((k) => delete avatarCache[k]);
+
+        assigneeSearchCache.clear();
+        labelSearchCache.clear();
+
+        cachedUser = null;
+    }
+
     // Cache for table thead HTML and URL to detect changes
     let lastCachedTheadHtml: string | null = null;
     let lastCachedUrl: string | null = null;
@@ -2471,6 +2481,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         if (currentUrl !== lastCachedUrl || currentTheadHtml !== lastCachedTheadHtml) {
             lastCachedUrl = currentUrl;
             lastCachedTheadHtml = currentTheadHtml;
+            clearCache();
 
             document.querySelectorAll('.new-task-row').forEach((row) => row.remove());
         }

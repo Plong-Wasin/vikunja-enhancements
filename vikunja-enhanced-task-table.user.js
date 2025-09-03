@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.4.0
+// @version      0.4.1
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -2028,6 +2028,13 @@
         }
         return parentIds;
     }
+    function clearCache() {
+        Object.keys(taskCache).forEach((k) => delete taskCache[+k]);
+        Object.keys(avatarCache).forEach((k) => delete avatarCache[k]);
+        assigneeSearchCache.clear();
+        labelSearchCache.clear();
+        cachedUser = null;
+    }
     // Cache for table thead HTML and URL to detect changes
     let lastCachedTheadHtml = null;
     let lastCachedUrl = null;
@@ -2040,6 +2047,7 @@
         if (currentUrl !== lastCachedUrl || currentTheadHtml !== lastCachedTheadHtml) {
             lastCachedUrl = currentUrl;
             lastCachedTheadHtml = currentTheadHtml;
+            clearCache();
             document.querySelectorAll('.new-task-row').forEach((row) => row.remove());
         }
     }, 100);
