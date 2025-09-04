@@ -146,8 +146,8 @@
         cell.style.cursor = 'pointer';
         cell.classList.add('enhanced');
         cell.classList.add('column-title');
-        const linkToTitle = cell.querySelector('a');
-        if (!linkToTitle)
+        const titleLink = cell.querySelector('a');
+        if (!titleLink)
             return;
         // Create container div to hold link, editable input, and edit button
         const container = document.createElement('div');
@@ -157,37 +157,69 @@
         const titleWrapper = document.createElement('span');
         titleWrapper.classList.add('title-wrapper');
         // Create span holding text separate from icons
-        const titleText = document.createElement('span');
-        titleText.classList.add('title-text');
-        titleText.textContent = linkToTitle.textContent ?? '';
-        linkToTitle.textContent = '';
-        linkToTitle.appendChild(titleText);
-        // Append link
-        titleWrapper.appendChild(linkToTitle);
-        // Add attachment icon if attachments exist
+        const titleTextSpan = document.createElement('span');
+        titleTextSpan.classList.add('title-text');
+        titleTextSpan.textContent = titleLink.textContent ?? '';
+        titleLink.textContent = '';
+        titleLink.appendChild(titleTextSpan);
+        // Append link to wrapper
+        titleWrapper.appendChild(titleLink);
+        // Fetch the task data by extracting task ID from cell
         const task = await fetchTaskById(extractTaskIdFromElement(cell));
+        // Add attachment icon if attachments exist
         if (task.attachments) {
-            const fileIcon = document.createElement('span');
-            fileIcon.className = 'project-task-icon';
-            fileIcon.innerHTML = `
-            <svg class="svg-inline--fa fa-paperclip" data-prefix="fas" data-icon="paperclip" role="img" viewBox="0 0 512 512" aria-hidden="true"><path class="" fill="currentColor" d="M224.6 12.8c56.2-56.2 147.4-56.2 203.6 0s56.2 147.4 0 203.6l-164 164c-34.4 34.4-90.1 34.4-124.5 0s-34.4-90.1 0-124.5L292.5 103.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L185 301.3c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l164-164c31.2-31.2 31.2-81.9 0-113.1s-81.9-31.2-113.1 0l-164 164c-53.1 53.1-53.1 139.2 0 192.3s139.2 53.1 192.3 0L428.3 284.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L343.4 459.6c-78.1 78.1-204.7 78.1-282.8 0s-78.1-204.7 0-282.8l164-164z"></path></svg>`;
-            titleWrapper.appendChild(fileIcon);
+            const attachmentIcon = createAttachmentIcon();
+            titleWrapper.appendChild(attachmentIcon);
         }
         // Add description icon if description exists
-        if (task.description) {
-            const descIcon = document.createElement('span');
-            descIcon.className = 'project-task-icon is-mirrored-rtl';
-            descIcon.innerHTML = `
-            <svg class="svg-inline--fa fa-align-left" data-prefix="fas" data-icon="align-left" role="img" viewBox="0 0 448 512" aria-hidden="true"><path class="" fill="currentColor" d="M288 64c0 17.7-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l224 0c17.7 0 32 14.3 32 32zm0 256c0 17.7-14.3 32-32 32L32 352c-17.7 0-32-14.3-32-32s14.3-32 32-32l224 0c17.7 0 32 14.3 32 32zM0 192c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 224c-17.7 0-32-14.3-32-32zM448 448c0 17.7-14.3 32-32 32L32 480c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"></path></svg>`;
-            titleWrapper.appendChild(descIcon);
+        if (taskHasDescription(task)) {
+            const descriptionIcon = createDescriptionIcon();
+            titleWrapper.appendChild(descriptionIcon);
         }
         container.appendChild(titleWrapper);
-        const editableInputSpan = createContentEditableSpan();
-        container.appendChild(editableInputSpan);
-        const editButton = createEditButton(linkToTitle, editableInputSpan);
+        // Create and append editable content span
+        const editableContentSpan = createContentEditableSpan();
+        container.appendChild(editableContentSpan);
+        // Create and append edit button linked to title link and editable span
+        const editButton = createEditButton(titleLink, editableContentSpan);
         container.appendChild(editButton);
-        container.addEventListener('dblclick', () => activateEditMode(linkToTitle, editableInputSpan));
-        attachEditableSpanEventHandlers(linkToTitle, editableInputSpan);
+        // Add event listeners for editing interactions
+        container.addEventListener('dblclick', () => activateEditMode(titleLink, editableContentSpan));
+        attachEditableSpanEventHandlers(titleLink, editableContentSpan);
+    }
+    /**
+     * Creates an element representing an attachment icon.
+     */
+    function createAttachmentIcon() {
+        const fileIcon = document.createElement('span');
+        fileIcon.className = 'project-task-icon';
+        fileIcon.innerHTML = `
+        <svg class="svg-inline--fa fa-paperclip" data-prefix="fas" data-icon="paperclip" role="img" viewBox="0 0 512 512" aria-hidden="true">
+            <path fill="currentColor" d="M224.6 12.8c56.2-56.2 147.4-56.2 203.6 0s56.2 147.4 0 203.6l-164 164c-34.4 34.4-90.1 34.4-124.5 0s-34.4-90.1 0-124.5L292.5 103.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L185 301.3c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l164-164c31.2-31.2 31.2-81.9 0-113.1s-81.9-31.2-113.1 0l-164 164c-53.1 53.1-53.1 139.2 0 192.3s139.2 53.1 192.3 0L428.3 284.3c12.5-12.5 32.8-12.5 45.3 0s12.5 32.8 0 45.3L343.4 459.6c-78.1 78.1-204.7 78.1-282.8 0s-78.1-204.7 0-282.8l164-164z"/>
+        </svg>`;
+        return fileIcon;
+    }
+    /**
+     * Determines whether the task has a non-empty description.
+     */
+    function taskHasDescription(task) {
+        if (!task.description)
+            return false;
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = task.description;
+        return tempDiv.textContent?.trim().length !== 0;
+    }
+    /**
+     * Creates an element representing a description icon.
+     */
+    function createDescriptionIcon() {
+        const descriptionIcon = document.createElement('span');
+        descriptionIcon.className = 'project-task-icon is-mirrored-rtl';
+        descriptionIcon.innerHTML = `
+        <svg class="svg-inline--fa fa-align-left" data-prefix="fas" data-icon="align-left" role="img" viewBox="0 0 448 512" aria-hidden="true">
+            <path fill="currentColor" d="M288 64c0 17.7-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l224 0c17.7 0 32 14.3 32 32zm0 256c0 17.7-14.3 32-32 32L32 352c-17.7 0-32-14.3-32-32s14.3-32 32-32l224 0c17.7 0 32 14.3 32 32zM0 192c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 224c-17.7 0-32-14.3-32-32zM448 448c0 17.7-14.3 32-32 32L32 480c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"/>
+        </svg>`;
+        return descriptionIcon;
     }
     /** Applies flex container styling to the given element */
     function applyFlexContainerStyle(element) {
