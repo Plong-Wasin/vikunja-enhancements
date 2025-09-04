@@ -2663,6 +2663,11 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     align-items: center;
                     gap: 4px;
                 }
+                .label-wrapper {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 6px;
+                }
             }
         }
     `);
