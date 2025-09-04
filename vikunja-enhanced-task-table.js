@@ -1202,6 +1202,9 @@
             cell.classList.add('bulk-edit', 'enhanced');
             attachLabelsMenuTrigger(cell);
         });
+        if (labelCells.length) {
+            refreshLabelsColumnUI();
+        }
     }
     /**
      * Attaches click handler to label cells to open label menu.

@@ -1523,6 +1523,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             cell.classList.add('bulk-edit', 'enhanced');
             attachLabelsMenuTrigger(cell);
         });
+        if (labelCells.length) {
+            refreshLabelsColumnUI();
+        }
     }
 
     /**
