@@ -205,9 +205,7 @@
     function taskHasDescription(task) {
         if (!task.description)
             return false;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = task.description;
-        return tempDiv.textContent?.trim().length !== 0;
+        return task.description !== '<p></p>';
     }
     /**
      * Creates an element representing a description icon.

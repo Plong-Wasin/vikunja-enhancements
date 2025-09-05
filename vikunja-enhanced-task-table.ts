@@ -349,9 +349,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function taskHasDescription(task: { description?: string }): boolean {
         if (!task.description) return false;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = task.description;
-        return tempDiv.textContent?.trim().length !== 0;
+        return task.description !== '<p></p>';
     }
 
     /**

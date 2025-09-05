@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.4.4
+// @version      0.4.5
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -219,9 +219,7 @@
     function taskHasDescription(task) {
         if (!task.description)
             return false;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = task.description;
-        return tempDiv.textContent?.trim().length !== 0;
+        return task.description !== '<p></p>';
     }
     /**
      * Creates an element representing a description icon.
