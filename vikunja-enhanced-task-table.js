@@ -386,31 +386,18 @@
         });
     }
     /**
-     * Updates the done status (UI and backend) for a single task row.
+     * Updates the done status for all rows currently bulk-selected in the tbody.
+     * Sends an API request per task to update its done status, then updates
+     * the UI checkboxes and done labels accordingly.
      */
-    function updateDoneStatusForRow(row, done) {
-        const doneLabelDiv = row.querySelector('.is-done--small');
-        if (!doneLabelDiv)
-            return;
-        updateDoneLabelVisibility(doneLabelDiv, done);
-        const taskId = extractTaskIdFromRow(row);
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `/api/v1/tasks/${taskId}`,
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ done, done_at: new Date().toISOString() })
-        });
-    }
-    /**
-     * Updates done status for all bulk-selected rows and sends bulk API request.
-     */
-    function updateDoneStatusForBulkRows(tbody, done) {
+    async function updateDoneStatusForBulkRows(tbody, done) {
         const selectedRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
         const taskIds = selectedRows.map(extractTaskIdFromRow);
-        taskIds.forEach((taskId) => {
+        for (const taskId of taskIds) {
+            const task = await fetchTaskById(taskId);
+            if (done && task.done) {
+                continue; // Skip if already done and setting to done
+            }
             GM_xmlhttpRequest({
                 method: 'POST',
                 url: `/api/v1/tasks/${taskId}`,
@@ -421,7 +408,8 @@
                 data: JSON.stringify({ done, done_at: done ? new Date().toISOString() : null }),
                 responseType: 'json'
             });
-        });
+        }
+        // Update each selected row's checkbox and done label visibility
         selectedRows.forEach((row) => {
             const checkbox = row.querySelector('input[type="checkbox"]');
             const labelDiv = row.querySelector('.is-done--small');
