@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.4.5
+// @version      0.4.6
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -396,12 +396,7 @@
             const tbody = row.closest('tbody');
             if (!tbody)
                 return;
-            if (row.classList.contains('bulk-selected')) {
-                updateDoneStatusForBulkRows(tbody, checked);
-            }
-            else {
-                updateDoneStatusForRow(row, checked);
-            }
+            updateDoneStatusForBulkRows(tbody, checked);
         });
     }
     /**
@@ -420,7 +415,7 @@
                 Authorization: `Bearer ${getJwtToken()}`,
                 'Content-Type': 'application/json'
             },
-            data: JSON.stringify({ done })
+            data: JSON.stringify({ done, done_at: new Date().toISOString() })
         });
     }
     /**
@@ -429,14 +424,17 @@
     function updateDoneStatusForBulkRows(tbody, done) {
         const selectedRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
         const taskIds = selectedRows.map(extractTaskIdFromRow);
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `/api/v1/tasks/bulk`,
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ done, task_ids: taskIds })
+        taskIds.forEach((taskId) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `/api/v1/tasks/${taskId}`,
+                headers: {
+                    Authorization: `Bearer ${getJwtToken()}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({ done, done_at: done ? new Date().toISOString() : null }),
+                responseType: 'json'
+            });
         });
         selectedRows.forEach((row) => {
             const checkbox = row.querySelector('input[type="checkbox"]');
