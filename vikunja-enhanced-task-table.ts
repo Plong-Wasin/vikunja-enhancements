@@ -130,10 +130,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     const COLUMN_START_DATE = 7;
     const COLUMN_END_DATE = 8;
     const COLUMN_PROGRESS = 9;
-    const COLUMN_DONE_AT = 10;
-    const COLUMN_CREATED = 11;
-    const COLUMN_UPDATED = 12;
-    const COLUMN_CREATED_BY = 13;
 
     // Colors used for UI elements and themes
     const COLORS = [
@@ -177,8 +173,8 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     }
 
     /** Logs messages prefixed with [Vikunja] in console */
-    function log(...args: any[]): void {
-        console.log('%c[Vikunja]', 'color: #ebd927', ...args);
+    function log(...args: unknown[]): void {
+        console.log('%c[Vikunja-Enhanced-Task-Table]', 'color: #ebd927', ...args);
     }
 
     /**
@@ -188,7 +184,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function getVisibleColumnIndices(): number[] {
         const checkedIndices: number[] = [];
         document.querySelectorAll<HTMLInputElement>('.columns-filter input').forEach((input, index) => {
-            if (input.checked) checkedIndices.push(index);
+            if (input.checked) {
+                checkedIndices.push(index);
+            }
         });
         return checkedIndices;
     }
@@ -198,9 +196,13 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      * Returns 0 if not found.
      */
     function extractTaskIdFromRow(row: HTMLTableRowElement | null): number {
-        if (!row) return 0;
+        if (!row) {
+            return 0;
+        }
         const link = row.querySelector<HTMLAnchorElement>('a');
-        if (!link) return 0;
+        if (!link) {
+            return 0;
+        }
         const idStr = link.href.split('/').pop();
         return idStr ? Number(idStr) : 0;
     }
@@ -263,7 +265,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function addEditableTitleFeature() {
         const visibleTitlePos = getVisibleColumnPosition(COLUMN_TITLE);
-        if (visibleTitlePos === -1) return;
+        if (visibleTitlePos === -1) {
+            return;
+        }
 
         const titleCells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleTitlePos + 1}):not(.enhanced)`
@@ -280,7 +284,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         cell.classList.add('column-title');
 
         const titleLink = cell.querySelector<HTMLAnchorElement>('a');
-        if (!titleLink) return;
+        if (!titleLink) {
+            return;
+        }
 
         // Create container div to hold link, editable input, and edit button
         const container = document.createElement('div');
@@ -348,7 +354,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      * Determines whether the task has a non-empty description.
      */
     function taskHasDescription(task: { description?: string }): boolean {
-        if (!task.description) return false;
+        if (!task.description) {
+            return false;
+        }
         return task.description !== '<p></p>';
     }
 
@@ -409,7 +417,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         range.collapse(false);
 
         const sel = window.getSelection();
-        if (!sel) return;
+        if (!sel) {
+            return;
+        }
         sel.removeAllRanges();
         sel.addRange(range);
         element.focus();
@@ -437,7 +447,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      * Uses an approximation of WCAG APCA formula.
      */
     function isHexColorLight(color: string | undefined): boolean {
-        if (!color || color === '#') return true;
+        if (!color || color === '#') {
+            return true;
+        }
 
         if (!color.startsWith('#')) {
             color = '#' + color;
@@ -506,7 +518,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function addDoneCheckboxFeature(): void {
         const visibleDonePos = getVisibleColumnPosition(COLUMN_DONE);
-        if (visibleDonePos === -1) return;
+        if (visibleDonePos === -1) {
+            return;
+        }
 
         const doneCells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleDonePos + 1}):not(.enhanced)`
@@ -526,7 +540,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         const doneLabelDiv = cell.querySelector<HTMLDivElement>('.is-done--small');
         const checkbox = cell.querySelector<HTMLInputElement>('input[type="checkbox"]');
-        if (!doneLabelDiv || !checkbox) return;
+        if (!doneLabelDiv || !checkbox) {
+            return;
+        }
 
         updateDoneLabelVisibility(doneLabelDiv, checkbox.checked);
         attachDoneCheckboxEvents(checkbox, cell.closest('tr')!);
@@ -552,7 +568,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         checkbox.addEventListener('change', () => {
             const checked = checkbox.checked;
             const tbody = row.closest('tbody');
-            if (!tbody) return;
+            if (!tbody) {
+                return;
+            }
 
             updateDoneStatusForBulkRows(tbody, checked);
         });
@@ -636,7 +654,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         while (remainingIds.length > 0) {
             const filter = 'id in ' + remainingIds.join(',');
-            const response: Tampermonkey.Response<any> = await new Promise((resolve, reject) => {
+            const response: Tampermonkey.Response<string> = await new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
                     method: 'GET',
                     url: `/api/v1/tasks/all?filter=${encodeURIComponent(filter)}`,
@@ -645,16 +663,19 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                         'Content-Type': 'application/json'
                     },
                     onload: resolve,
-                    onerror: reject
+                    onerror: reject,
+                    responseType: 'json'
                 });
             });
 
-            const data = JSON.parse(response.responseText);
+            const data = response.response;
             results.push(...data);
 
-            const fetchedIds = data.map((task: any) => task.id);
+            const fetchedIds = data.map((task: Task) => task.id);
             remainingIds = remainingIds.filter((id) => !fetchedIds.includes(id));
-            if (fetchedIds.length === 0) break;
+            if (fetchedIds.length === 0) {
+                break;
+            }
         }
 
         return results;
@@ -675,11 +696,15 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function addPrioritySelectFeature(): Promise<void> {
         const visiblePriorityPos = getVisibleColumnPosition(COLUMN_PRIORITY);
-        if (visiblePriorityPos === -1) return;
+        if (visiblePriorityPos === -1) {
+            return;
+        }
 
         const tasks = await fetchTasks(getAllTaskIds());
         const tbody = document.querySelector('tbody');
-        if (!tbody) return;
+        if (!tbody) {
+            return;
+        }
 
         const rows = tbody.querySelectorAll<HTMLTableRowElement>('tr');
         rows.forEach((row) => configurePriorityCell(row, tasks, visiblePriorityPos));
@@ -691,7 +716,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function configurePriorityCell(row: HTMLTableRowElement, tasks: Task[], colPos: number): void {
         const taskId = extractTaskIdFromRow(row);
         const cell = row.children[colPos] as HTMLTableCellElement;
-        if (cell.classList.contains('enhanced')) return;
+        if (cell.classList.contains('enhanced')) {
+            return;
+        }
 
         cell.classList.add('enhanced');
 
@@ -739,7 +766,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function attachPriorityChangeHandler(select: HTMLSelectElement, row: HTMLTableRowElement): void {
         select.addEventListener('change', () => {
             const tbody = row.closest('tbody');
-            if (!tbody) return;
+            if (!tbody) {
+                return;
+            }
 
             const selectedPriority = +select.value;
             updatePriorityForBulkRows(tbody, selectedPriority);
@@ -766,7 +795,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         bulkRows.forEach((row) => {
             const selectElement = row.querySelector<HTMLSelectElement>('.priority-select');
-            if (selectElement) updatePrioritySelectAppearance(selectElement, priority);
+            if (selectElement) {
+                updatePrioritySelectAppearance(selectElement, priority);
+            }
         });
     }
 
@@ -797,7 +828,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         taskDateField: TaskDateField
     ): Promise<void> {
         const visibleColPos = getVisibleColumnPosition(columnIndex);
-        if (visibleColPos === -1) return;
+        if (visibleColPos === -1) {
+            return;
+        }
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleColPos + 1}):not(.enhanced)`
@@ -845,7 +878,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         fieldName: TaskDateField
     ): void {
         const row = cell.closest('tr');
-        if (!row) return;
+        if (!row) {
+            return;
+        }
 
         const newDateISO = new Date(input.value).toISOString();
 
@@ -864,7 +899,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         selectedRows.forEach((row) => {
             const bulkInput = row.querySelector<HTMLInputElement>(`.${inputClass}`);
-            if (bulkInput) bulkInput.value = input.value;
+            if (bulkInput) {
+                bulkInput.value = input.value;
+            }
         });
     }
 
@@ -886,7 +923,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function addProgressEditingFeature(): void {
         const visibleProgressPos = getVisibleColumnPosition(COLUMN_PROGRESS);
-        if (visibleProgressPos === -1) return;
+        if (visibleProgressPos === -1) {
+            return;
+        }
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleProgressPos + 1}):not(.enhanced)`
@@ -904,7 +943,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function setupProgressEditing(cell: HTMLTableCellElement): void {
         cell.addEventListener('dblclick', (event) => {
-            if ((event.target as HTMLElement).tagName === 'INPUT') return; // already editing
+            if ((event.target as HTMLElement).tagName === 'INPUT') {
+                return;
+            } // already editing
 
             const currentValue = parseInt(cell.innerText) || 0;
             const input = createProgressNumberInput(currentValue);
@@ -1006,7 +1047,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function addAssigneesSelectionFeature(): void {
         const visibleAssigneesPos = getVisibleColumnPosition(COLUMN_ASSIGNEES);
-        if (visibleAssigneesPos === -1) return;
+        if (visibleAssigneesPos === -1) {
+            return;
+        }
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleAssigneesPos + 1}):not(.enhanced)`
@@ -1025,7 +1068,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function attachAssigneeMenuTrigger(cell: HTMLTableCellElement): void {
         cell.addEventListener('click', (event) => {
             const target = event.target as HTMLElement | null;
-            if (target?.closest('#assigneesMenu') || !document.contains(target)) return;
+            if (target?.closest('#assigneesMenu') || !document.contains(target)) {
+                return;
+            }
 
             closeAssigneesMenu();
             openAssigneesMenuAtCell(cell);
@@ -1114,7 +1159,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         const inputField = menu.querySelector<HTMLInputElement>('.input');
         const selectedList = menu.querySelector<HTMLDivElement>('#assigneesSelectedList');
-        if (!selectedList) return;
+        if (!selectedList) {
+            return;
+        }
 
         await refreshSelectedAssigneesList(cell, selectedList);
         setupAssigneeSearchInput(inputField, menu);
@@ -1191,7 +1238,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function removeAssigneeHandler(removeButton: HTMLButtonElement, assigneeId: number): void {
         const row = removeButton.closest('tr');
-        if (!row) return;
+        if (!row) {
+            return;
+        }
 
         if (row.classList.contains('bulk-selected')) {
             const bulkRows = document.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected');
@@ -1231,7 +1280,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function fetchAvatarImage(username: string): Promise<string> {
         const size = 30;
-        if (avatarCache[username]) return Promise.resolve(avatarCache[username]);
+        if (avatarCache[username]) {
+            return Promise.resolve(avatarCache[username]);
+        }
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -1261,7 +1312,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      * Sets up the assignee search input field with debounce and search handling.
      */
     async function setupAssigneeSearchInput(input: HTMLInputElement | null, menu: HTMLDivElement): Promise<void> {
-        if (!input) return;
+        if (!input) {
+            return;
+        }
 
         input.focus();
 
@@ -1279,7 +1332,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function performAssigneeSearch(input: HTMLInputElement, menu: HTMLDivElement, projectId: number): void {
         const query = input.value.trim();
         const resultsContainer = menu.querySelector<HTMLDivElement>('.search-results');
-        if (!resultsContainer) return;
+        if (!resultsContainer) {
+            return;
+        }
 
         const cacheKey = `${projectId}:${query}`;
         if (assigneeSearchCache.has(cacheKey)) {
@@ -1414,7 +1469,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function refreshAssigneesColumnUI(): Promise<void> {
         const visibleAssigneesPos = getVisibleColumnPosition(COLUMN_ASSIGNEES);
-        if (visibleAssigneesPos === -1) return;
+        if (visibleAssigneesPos === -1) {
+            return;
+        }
 
         const cells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleAssigneesPos + 1}):not(:has(#assigneesMenu))`
@@ -1423,7 +1480,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         for (const cell of cells) {
             cell.innerHTML = '';
             const task = await fetchTaskById(extractTaskIdFromElement(cell));
-            if (!task.assignees) continue;
+            if (!task.assignees) {
+                continue;
+            }
 
             const container = document.createElement('div');
             container.className = 'assignees-list is-inline mis-1';
@@ -1459,13 +1518,19 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function refreshAssigneesUI(): Promise<void> {
         const menu = document.querySelector<HTMLDivElement>('#assigneesMenu');
-        if (!menu) return;
+        if (!menu) {
+            return;
+        }
 
         const cell = menu.closest('td');
-        if (!cell) return;
+        if (!cell) {
+            return;
+        }
 
         const selectedList = menu.querySelector<HTMLDivElement>('#assigneesSelectedList');
-        if (!selectedList) return;
+        if (!selectedList) {
+            return;
+        }
 
         await updateAssigneeSearchButtonVisibility(menu, cell);
         await refreshSelectedAssigneesList(cell, selectedList);
@@ -1495,7 +1560,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function addLabelsSelectionFeature(): void {
         const visibleLabelPos = getVisibleColumnPosition(COLUMN_LABELS);
-        if (visibleLabelPos === -1) return;
+        if (visibleLabelPos === -1) {
+            return;
+        }
 
         const labelCells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleLabelPos + 1}):not(.enhanced)`
@@ -1517,7 +1584,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function attachLabelsMenuTrigger(cell: HTMLTableCellElement): void {
         cell.addEventListener('click', (event) => {
             const target = event.target as HTMLElement | null;
-            if (target?.closest('#labelsMenu') || !document.contains(target)) return;
+            if (target?.closest('#labelsMenu') || !document.contains(target)) {
+                return;
+            }
 
             closeLabelsMenu();
             openLabelsMenuAtCell(cell);
@@ -1609,7 +1678,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         const inputField = menu.querySelector<HTMLInputElement>('.input');
         const selectedList = menu.querySelector<HTMLDivElement>('#labelsSelectedList');
-        if (!selectedList) return;
+        if (!selectedList) {
+            return;
+        }
 
         await refreshSelectedLabelsList(cell, selectedList);
         setupLabelsSearchInput(inputField, menu);
@@ -1635,7 +1706,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function refreshLabelsColumnUI(): Promise<void> {
         const visibleLabelPos = getVisibleColumnPosition(COLUMN_LABELS);
-        if (visibleLabelPos === -1) return;
+        if (visibleLabelPos === -1) {
+            return;
+        }
 
         const labelCells = document.querySelectorAll<HTMLTableCellElement>(
             `table td:nth-child(${visibleLabelPos + 1}):not(:has(#labelsMenu))`
@@ -1644,7 +1717,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         for (const cell of labelCells) {
             cell.innerHTML = '';
             const task = await fetchTaskById(extractTaskIdFromElement(cell));
-            if (!task.labels) continue;
+            if (!task.labels) {
+                continue;
+            }
 
             const wrapper = document.createElement('div');
             wrapper.className = 'label-wrapper';
@@ -1671,7 +1746,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      * Sets up search input with debounce for labels menu.
      */
     async function setupLabelsSearchInput(input: HTMLInputElement | null, menu: HTMLDivElement): Promise<void> {
-        if (!input) return;
+        if (!input) {
+            return;
+        }
 
         input.focus();
 
@@ -1686,7 +1763,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     async function handleLabelSearch(input: HTMLInputElement, menu: HTMLDivElement): Promise<void> {
         const query = input.value.trim();
         const resultsContainer = menu.querySelector<HTMLDivElement>('.search-results');
-        if (!resultsContainer) return;
+        if (!resultsContainer) {
+            return;
+        }
 
         const cacheKey = query;
         if (labelSearchCache.has(cacheKey)) {
@@ -1748,7 +1827,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     tag.style.color = isHexColorLight(color.replace('#', '')) ? COLOR_DARK : COLOR_LIGHT;
                 }
                 const hint = button.querySelector<HTMLSpanElement>('.hint-text');
-                if (hint) hint.textContent = 'Click to add';
+                if (hint) {
+                    hint.textContent = 'Click to add';
+                }
                 button.style.display = 'none';
                 GM_xmlhttpRequest({
                     url: `/api/v1/labels`,
@@ -1871,13 +1952,19 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     async function refreshLabelsUI(): Promise<void> {
         const menu = document.querySelector<HTMLDivElement>('#labelsMenu');
-        if (!menu) return;
+        if (!menu) {
+            return;
+        }
 
         const cell = menu.closest('td');
-        if (!cell) return;
+        if (!cell) {
+            return;
+        }
 
         const selectedList = menu.querySelector<HTMLDivElement>('#labelsSelectedList');
-        if (!selectedList) return;
+        if (!selectedList) {
+            return;
+        }
 
         await refreshSelectedLabelsList(cell, selectedList);
         await updateLabelSearchButtonVisibility(menu, cell);
@@ -1903,7 +1990,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     async function refreshSelectedLabelsList(cell: HTMLTableCellElement, selectedList: HTMLDivElement): Promise<void> {
         selectedList.innerHTML = '';
         const task = await fetchTaskById(extractTaskIdFromElement(cell));
-        if (!task?.labels) return;
+        if (!task?.labels) {
+            return;
+        }
 
         const sortedLabels = await sortLabelsAlphabetically(task.labels);
 
@@ -2125,12 +2214,16 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const clickedRow = target.closest('tr');
         const tbody = clickedRow?.closest('tbody');
         const filterContainer = document.querySelector('.columns-filter');
-        if (!clickedRow || !tbody || !filterContainer) return;
+        if (!clickedRow || !tbody || !filterContainer) {
+            return;
+        }
 
         const allRows = Array.from(tbody.querySelectorAll('tr'));
 
         // Ignore clicks within selected bulk-edit controls
-        if (target.closest('.bulk-edit')?.closest('.bulk-selected')) return;
+        if (target.closest('.bulk-edit')?.closest('.bulk-selected')) {
+            return;
+        }
 
         if (!target.closest('.bulk-edit')) {
             event.preventDefault();
@@ -2159,7 +2252,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Drag start prepares list of dragged rows if they belong to bulk-selected class
     document.addEventListener('dragstart', (event: DragEvent) => {
-        if (!getColumnsFilterElement()) return;
+        if (!getColumnsFilterElement()) {
+            return;
+        }
         const draggedRow = (event.target as HTMLElement).closest('tr') as HTMLTableRowElement | null;
         const tbody = draggedRow?.closest('tbody');
         if (!draggedRow || !tbody || !draggedRow.classList.contains('bulk-selected')) {
@@ -2174,7 +2269,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Dragover event adds visual helpers and prevents illegal drops, considering task hierarchy constraints
     document.addEventListener('dragover', (event) => {
-        if (!getColumnsFilterElement()) return;
+        if (!getColumnsFilterElement()) {
+            return;
+        }
 
         const target = event.target as HTMLElement;
         const table = target.closest<HTMLTableElement>('table');
@@ -2225,7 +2322,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Drop event handles updating task hierarchy, project moves, and parent task reassignment on drop
     document.addEventListener('drop', async (event) => {
-        if (!getColumnsFilterElement()) return;
+        if (!getColumnsFilterElement()) {
+            return;
+        }
 
         const draggedTaskIds = currentlyDraggedRows.map(extractTaskIdFromElement);
         let topLevelDraggedIds = [...draggedTaskIds];
@@ -2267,7 +2366,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             await Promise.all(
                 topLevelDraggedIds.map(async (draggedId) => {
                     const draggedTask = await fetchTaskById(draggedId);
-                    if (!draggedTask || !targetTaskId) return;
+                    if (!draggedTask || !targetTaskId) {
+                        return;
+                    }
 
                     const oldParentId = draggedTask.related_tasks.parenttask?.[0]?.id;
                     if (oldParentId) {
@@ -2310,7 +2411,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             await Promise.all(
                 topLevelDraggedIds.map(async (id) => {
                     const task = await fetchTaskById(id);
-                    if (!task) return;
+                    if (!task) {
+                        return;
+                    }
                     const oldParentId = task.related_tasks.parenttask?.[0]?.id;
                     if (oldParentId) {
                         await new Promise<void>((resolve) => {
@@ -2368,9 +2471,13 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     function initializeRowSelectionMutationObserver(): void {
         const observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
-                if (mutation.type !== 'attributes' || mutation.attributeName !== 'class') continue;
+                if (mutation.type !== 'attributes' || mutation.attributeName !== 'class') {
+                    continue;
+                }
                 const element = mutation.target;
-                if (!(element instanceof HTMLTableRowElement)) continue;
+                if (!(element instanceof HTMLTableRowElement)) {
+                    continue;
+                }
 
                 handleRowSelectionClassChange(element, mutation.oldValue);
             }
@@ -2409,7 +2516,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         let currentId = taskId;
 
         const baseTask = await fetchTaskById(currentId);
-        if (!baseTask) return indentLevel;
+        if (!baseTask) {
+            return indentLevel;
+        }
 
         while (true) {
             const task = await fetchTaskById(currentId);
@@ -2454,7 +2563,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 const task = await fetchTaskById(extractTaskIdFromRow(row));
                 const parentId = task.related_tasks.parenttask![0].id;
                 const parentRow = [...rows].find((r) => extractTaskIdFromRow(r) === parentId);
-                if (parentRow) parentRow.insertAdjacentElement('afterend', row);
+                if (parentRow) {
+                    parentRow.insertAdjacentElement('afterend', row);
+                }
             }
             row.style.setProperty('--level', level.toString());
         }
@@ -2469,7 +2580,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         while (true) {
             const task = await fetchTaskById(currentId);
-            if (!task.related_tasks?.parenttask?.length) break;
+            if (!task.related_tasks?.parenttask?.length) {
+                break;
+            }
 
             const parentId = task.related_tasks.parenttask[0].id;
             parentIds.push(parentId);
@@ -2528,7 +2641,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /** Fix horizontal overflow for tables inside scrollable containers */
     function fixTableHorizontalOverflow(): void {
         const container = document.querySelector('table')?.closest<HTMLElement>('.has-horizontal-overflow');
-        if (container) container.style.overflow = 'visible';
+        if (container) {
+            container.style.overflow = 'visible';
+        }
     }
 
     // Debounced version of updateTaskAddFormVisibility to avoid rapid calls
@@ -2574,26 +2689,14 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /**
      * Creates a debounced function that delays its invocation.
      */
-    function debounce<T extends (...args: any[]) => void>(func: T, delay = 300) {
-        let timeoutId: ReturnType<typeof setTimeout> | null;
+    function debounce<T extends (...args: Args) => void, Args extends unknown[]>(func: T, delay = 300) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-        return function (this: ThisParameterType<T>, ...args: Parameters<T>) {
-            if (timeoutId) clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => func.apply(this, args), delay);
-        };
-    }
-
-    /**
-     * Creates a throttled function that limits invocation frequency.
-     */
-    function throttle<T extends (...args: any[]) => void>(func: T, limit: number) {
-        let inThrottle = false;
-        return function (this: any, ...args: Parameters<T>) {
-            if (!inThrottle) {
-                func.apply(this, args);
-                inThrottle = true;
-                setTimeout(() => (inThrottle = false), limit);
+        return function (this: ThisParameterType<T>, ...args: Args) {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
             }
+            timeoutId = setTimeout(() => func.apply(this, args), delay);
         };
     }
 
