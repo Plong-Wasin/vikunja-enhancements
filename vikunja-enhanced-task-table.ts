@@ -478,8 +478,18 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             return;
         }
 
-        const taskId = link.href.split('/').pop();
+        const taskId = extractTaskIdFromElement(link);
         if (taskId) {
+            updateSingleTask(taskId, { title: newText });
+        }
+
+        restoreTitleView(link, editableSpan, newText);
+    }
+
+    async function updateSingleTask(taskId: number, payload: Partial<Task>): Promise<Task> {
+        const task = await fetchTaskById(taskId);
+
+        return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'POST',
                 url: `/api/v1/tasks/${taskId}`,
@@ -487,11 +497,17 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     Authorization: `Bearer ${getJwtToken()}`,
                     'Content-Type': 'application/json'
                 },
-                data: JSON.stringify({ title: newText })
+                data: JSON.stringify({ ...task, ...payload }),
+                responseType: 'json',
+                onload: (response) => {
+                    log({ ...task, ...payload });
+                    const updatedTask = response.response as Task;
+                    taskCache[taskId] = { ...taskCache[taskId], ...updatedTask };
+                    resolve(updatedTask);
+                },
+                onerror: (err) => reject(err)
             });
-        }
-
-        restoreTitleView(link, editableSpan, newText);
+        });
     }
 
     /**
@@ -584,22 +600,16 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     async function updateDoneStatusForBulkRows(tbody: HTMLTableSectionElement, done: boolean): Promise<void> {
         const selectedRows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected'));
         const taskIds = selectedRows.map(extractTaskIdFromRow);
+        const now = new Date().toISOString();
 
         for (const taskId of taskIds) {
             const task = await fetchTaskById(taskId);
             if (done && task.done) {
                 continue; // Skip if already done and setting to done
             }
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: `/api/v1/tasks/${taskId}`,
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({ done, done_at: done ? new Date().toISOString() : null }),
-                responseType: 'json'
-            });
+            updateSingleTask(taskId, { done, done_at: done ? now : '0001-01-01T00:00:00Z' });
+            taskCache[taskId].done = done;
+            taskCache[taskId].done_at = done ? now : '0001-01-01T00:00:00Z';
         }
 
         // Update each selected row's checkbox and done label visibility
@@ -611,6 +621,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 updateDoneLabelVisibility(labelDiv, done);
             }
         });
+        updatePrioritySelectsDisabledState();
     }
 
     /** Shows or hides the done label div based on checkbox state */
@@ -702,12 +713,28 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
         const tasks = await fetchTasks(getAllTaskIds());
         const tbody = document.querySelector('tbody');
-        if (!tbody) {
+        const rows = tbody?.querySelectorAll<HTMLTableRowElement>(
+            `tr:has(td:nth-child(${visiblePriorityPos + 1}):not(.enhanced))`
+        );
+        if (!tbody || !rows || rows.length === 0) {
             return;
         }
 
-        const rows = tbody.querySelectorAll<HTMLTableRowElement>('tr');
         rows.forEach((row) => configurePriorityCell(row, tasks, visiblePriorityPos));
+        updatePrioritySelectsDisabledState();
+    }
+
+    /**
+     * Updates the disabled state of all priority select elements based on task done status.
+     */
+    async function updatePrioritySelectsDisabledState(): Promise<void> {
+        const selects = document.querySelectorAll<HTMLSelectElement>('.priority-select');
+        for (const select of selects) {
+            const row = select.closest('tr');
+            const taskId = extractTaskIdFromRow(row);
+            const task = await fetchTaskById(taskId);
+            select.disabled = task.done;
+        }
     }
 
     /**
@@ -777,23 +804,23 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     }
 
     /**
-     * Updates the priority for all bulk-selected rows in UI and via bulk API call.
+     * Updates the priority for all bulk-selected rows in UI and via bulk API calls.
      */
-    function updatePriorityForBulkRows(tbody: HTMLTableSectionElement, priority: number): void {
+    async function updatePriorityForBulkRows(tbody: HTMLTableSectionElement, priority: number): Promise<void> {
         const bulkRows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected'));
         const taskIds = bulkRows.map(extractTaskIdFromRow);
+        const tasks = await fetchTasks(taskIds);
+        const filteredTaskIds = tasks.filter((task) => !task.done).map((task) => task.id);
 
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: '/api/v1/tasks/bulk',
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ priority, task_ids: taskIds })
-        });
+        for (const taskId of filteredTaskIds) {
+            updateSingleTask(taskId, { priority });
+        }
 
         bulkRows.forEach((row) => {
+            const taskId = extractTaskIdFromRow(row);
+            if (!filteredTaskIds.includes(taskId)) {
+                return;
+            }
             const selectElement = row.querySelector<HTMLSelectElement>('.priority-select');
             if (selectElement) {
                 updatePrioritySelectAppearance(selectElement, priority);
@@ -887,15 +914,9 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         const selectedRows = Array.from(document.querySelectorAll<HTMLTableRowElement>('tbody tr.bulk-selected'));
         const taskIds = selectedRows.map(extractTaskIdFromRow);
 
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: '/api/v1/tasks/bulk',
-            headers: {
-                Authorization: `Bearer ${getJwtToken()}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({ [fieldName]: newDateISO, task_ids: taskIds })
-        });
+        for (const taskId of taskIds) {
+            updateSingleTask(taskId, { [fieldName]: newDateISO });
+        }
 
         selectedRows.forEach((row) => {
             const bulkInput = row.querySelector<HTMLInputElement>(`.${inputClass}`);
@@ -984,15 +1005,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
      */
     function updateBulkProgressValues(taskIds: number[], progressPercent: number): void {
         for (const id of taskIds) {
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: `/api/v1/tasks/${id}`,
-                headers: {
-                    Authorization: `Bearer ${getJwtToken()}`,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({ percent_done: progressPercent / 100 })
-            });
+            updateSingleTask(id, { percent_done: progressPercent / 100 });
         }
     }
 
@@ -2252,7 +2265,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Drag start prepares list of dragged rows if they belong to bulk-selected class
     document.addEventListener('dragstart', (event: DragEvent) => {
-        if (!getColumnsFilterElement()) {
+        if (!getColumnsFilterElement() || !(event.target instanceof HTMLTableRowElement)) {
             return;
         }
         const draggedRow = (event.target as HTMLElement).closest('tr') as HTMLTableRowElement | null;
@@ -2269,7 +2282,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
     // Dragover event adds visual helpers and prevents illegal drops, considering task hierarchy constraints
     document.addEventListener('dragover', (event) => {
-        if (!getColumnsFilterElement()) {
+        if (!getColumnsFilterElement() || !currentlyDraggedRows) {
             return;
         }
 
@@ -2283,6 +2296,14 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
             event.preventDefault();
             event.dataTransfer!.dropEffect = 'move';
             targetRow.classList.add('drag-over');
+        } else if (projectMenu) {
+            // When dragging over a project menu link that is a different project: allow drop with indicator
+            const pmProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
+            if (pmProjectId > 0 && pmProjectId !== getProjectId()) {
+                projectMenu.classList.add('drag-over');
+                event.preventDefault();
+                event.dataTransfer!.dropEffect = 'move';
+            }
         } else if (!targetRow) {
             // When mouse hovers near (within 20px buffer) the table boundary (outside any row)
             const realTable = table || (target.querySelector('table') as HTMLElement | null);
@@ -2301,28 +2322,71 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     event.dataTransfer!.dropEffect = 'move';
                 }
             }
-        } else if (projectMenu) {
-            // When dragging over a project menu link that is a different project: allow drop with indicator
-            const pmProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
-            if (pmProjectId > 0 && pmProjectId !== getProjectId()) {
-                projectMenu.classList.add('drag-over');
-                event.preventDefault();
-                event.dataTransfer!.dropEffect = 'move';
-            }
         }
     });
 
     // Remove drag visual indicators on drag end or drag leave
     document.addEventListener('dragend', () => {
+        if (!currentlyDraggedRows) {
+            return;
+        }
         document.querySelector('.drag-over')?.classList.remove('drag-over');
     });
     document.addEventListener('dragleave', () => {
+        if (!currentlyDraggedRows) {
+            return;
+        }
         document.querySelector('.drag-over')?.classList.remove('drag-over');
     });
 
+    /**
+     * Helper to send API request to delete a parent task relation
+     */
+    function removeParentTaskRelation(draggedTaskId: number, oldParentId: number): Promise<void> {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'DELETE',
+                url: `/api/v1/tasks/${draggedTaskId}/relations/parenttask/${oldParentId}`,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${getJwtToken()}`
+                },
+                onload: () => resolve()
+            });
+        });
+    }
+
+    /**
+     * Helper to send API request to add a parent task relation
+     */
+    function addParentTaskRelation(draggedTaskId: number, newParentId: number): Promise<void> {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'PUT',
+                url: `/api/v1/tasks/${draggedTaskId}/relations`,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${getJwtToken()}`
+                },
+                data: JSON.stringify({
+                    relation_kind: 'parenttask',
+                    other_task_id: newParentId
+                }),
+                onload: () => resolve()
+            });
+        });
+    }
+
+    /**
+     * Helper to move tasks to new project via API
+     */
+    function moveTaskToProject(taskId: number, projectId: number): Promise<Task> {
+        return updateSingleTask(taskId, { project_id: projectId });
+    }
+
     // Drop event handles updating task hierarchy, project moves, and parent task reassignment on drop
     document.addEventListener('drop', async (event) => {
-        if (!getColumnsFilterElement()) {
+        if (!getColumnsFilterElement() || !currentlyDraggedRows) {
             return;
         }
 
@@ -2363,6 +2427,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         if (targetRow) {
             // Dropped on a table row: update parent task relation for dragged tasks
             const targetTaskId = extractTaskIdFromElement(targetRow);
+
             await Promise.all(
                 topLevelDraggedIds.map(async (draggedId) => {
                     const draggedTask = await fetchTaskById(draggedId);
@@ -2372,34 +2437,10 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
 
                     const oldParentId = draggedTask.related_tasks.parenttask?.[0]?.id;
                     if (oldParentId) {
-                        await new Promise<void>((resolve) => {
-                            GM_xmlhttpRequest({
-                                method: 'DELETE',
-                                url: `/api/v1/tasks/${draggedId}/relations/parenttask/${oldParentId}`,
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    Authorization: `Bearer ${getJwtToken()}`
-                                },
-                                onload: () => resolve()
-                            });
-                        });
+                        await removeParentTaskRelation(draggedId, oldParentId);
                     }
 
-                    await new Promise<void>((resolve) => {
-                        GM_xmlhttpRequest({
-                            method: 'PUT',
-                            url: `/api/v1/tasks/${draggedId}/relations`,
-                            headers: {
-                                'Content-Type': 'application/json',
-                                Authorization: `Bearer ${getJwtToken()}`
-                            },
-                            data: JSON.stringify({
-                                relation_kind: 'parenttask',
-                                other_task_id: targetTaskId
-                            }),
-                            onload: () => resolve()
-                        });
-                    });
+                    await addParentTaskRelation(draggedId, targetTaskId);
                 })
             );
 
@@ -2416,17 +2457,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                     }
                     const oldParentId = task.related_tasks.parenttask?.[0]?.id;
                     if (oldParentId) {
-                        await new Promise<void>((resolve) => {
-                            GM_xmlhttpRequest({
-                                method: 'DELETE',
-                                url: `/api/v1/tasks/${id}/relations/parenttask/${oldParentId}`,
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    Authorization: `Bearer ${getJwtToken()}`
-                                },
-                                onload: () => resolve()
-                            });
-                        });
+                        await removeParentTaskRelation(id, oldParentId);
                     }
                 })
             );
@@ -2437,23 +2468,7 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         } else if (projectMenu) {
             // Dropped on project menu link: move dragged tasks to new project
             const newProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
-            await Promise.all(
-                draggedTaskIds.map(
-                    (id) =>
-                        new Promise<void>((resolve) => {
-                            GM_xmlhttpRequest({
-                                method: 'POST',
-                                url: `/api/v1/tasks/${id}`,
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    Authorization: `Bearer ${getJwtToken()}`
-                                },
-                                data: JSON.stringify({ project_id: newProjectId }),
-                                onload: () => resolve()
-                            });
-                        })
-                )
-            );
+            await Promise.all(draggedTaskIds.map((id) => moveTaskToProject(id, newProjectId)));
 
             currentlyDraggedRows.forEach((row) => row.remove());
             clearCachedTaskData();
