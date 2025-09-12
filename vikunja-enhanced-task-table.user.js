@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.4.8
+// @version      0.4.9
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -344,6 +344,7 @@
                 data: JSON.stringify({ ...task, ...payload }),
                 responseType: 'json',
                 onload: (response) => {
+                    log({ ...task, ...payload });
                     const updatedTask = response.response;
                     taskCache[taskId] = { ...taskCache[taskId], ...updatedTask };
                     resolve(updatedTask);
@@ -446,7 +447,6 @@
                 updateDoneLabelVisibility(labelDiv, done);
             }
         });
-        updatePrioritySelectsDisabledState();
     }
     /** Shows or hides the done label div based on checkbox state */
     function updateDoneLabelVisibility(label, isChecked) {
@@ -528,19 +528,6 @@
             return;
         }
         rows.forEach((row) => configurePriorityCell(row, tasks, visiblePriorityPos));
-        updatePrioritySelectsDisabledState();
-    }
-    /**
-     * Updates the disabled state of all priority select elements based on task done status.
-     */
-    async function updatePrioritySelectsDisabledState() {
-        const selects = document.querySelectorAll('.priority-select');
-        for (const select of selects) {
-            const row = select.closest('tr');
-            const taskId = extractTaskIdFromRow(row);
-            const task = await fetchTaskById(taskId);
-            select.disabled = task.done;
-        }
     }
     /**
      * Creates and sets up the priority select dropdown for a single table row.
@@ -600,19 +587,13 @@
     /**
      * Updates the priority for all bulk-selected rows in UI and via bulk API calls.
      */
-    async function updatePriorityForBulkRows(tbody, priority) {
+    function updatePriorityForBulkRows(tbody, priority) {
         const bulkRows = Array.from(tbody.querySelectorAll('tr.bulk-selected'));
         const taskIds = bulkRows.map(extractTaskIdFromRow);
-        const tasks = await fetchTasks(taskIds);
-        const filteredTaskIds = tasks.filter((task) => !task.done).map((task) => task.id);
-        for (const taskId of filteredTaskIds) {
+        for (const taskId of taskIds) {
             updateSingleTask(taskId, { priority });
         }
         bulkRows.forEach((row) => {
-            const taskId = extractTaskIdFromRow(row);
-            if (!filteredTaskIds.includes(taskId)) {
-                return;
-            }
             const selectElement = row.querySelector('.priority-select');
             if (selectElement) {
                 updatePrioritySelectAppearance(selectElement, priority);
@@ -1839,14 +1820,12 @@
         const targetRow = target.closest('tbody tr');
         const projectMenu = target.closest('a.base-button.list-menu-link[href^="/projects/"]');
         if (targetRow && !targetRow.classList.contains('bulk-selected')) {
-            log('targetRow', targetRow);
             // When dragging over a non-selected row: allow drop and add visual indicator
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
             targetRow.classList.add('drag-over');
         }
         else if (projectMenu) {
-            log('projectMenu', projectMenu);
             // When dragging over a project menu link that is a different project: allow drop with indicator
             const pmProjectId = parseInt(projectMenu.href.split('/').pop() ?? '0');
             if (pmProjectId > 0 && pmProjectId !== getProjectId()) {
@@ -1856,7 +1835,6 @@
             }
         }
         else if (!targetRow) {
-            log('table', table);
             // When mouse hovers near (within 20px buffer) the table boundary (outside any row)
             const realTable = table || target.querySelector('table');
             if (realTable) {

@@ -621,7 +621,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
                 updateDoneLabelVisibility(labelDiv, done);
             }
         });
-        updatePrioritySelectsDisabledState();
     }
 
     /** Shows or hides the done label div based on checkbox state */
@@ -721,20 +720,6 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
         }
 
         rows.forEach((row) => configurePriorityCell(row, tasks, visiblePriorityPos));
-        updatePrioritySelectsDisabledState();
-    }
-
-    /**
-     * Updates the disabled state of all priority select elements based on task done status.
-     */
-    async function updatePrioritySelectsDisabledState(): Promise<void> {
-        const selects = document.querySelectorAll<HTMLSelectElement>('.priority-select');
-        for (const select of selects) {
-            const row = select.closest('tr');
-            const taskId = extractTaskIdFromRow(row);
-            const task = await fetchTaskById(taskId);
-            select.disabled = task.done;
-        }
     }
 
     /**
@@ -806,21 +791,15 @@ type TaskDateField = 'start_date' | 'due_date' | 'end_date';
     /**
      * Updates the priority for all bulk-selected rows in UI and via bulk API calls.
      */
-    async function updatePriorityForBulkRows(tbody: HTMLTableSectionElement, priority: number): Promise<void> {
+    function updatePriorityForBulkRows(tbody: HTMLTableSectionElement, priority: number): void {
         const bulkRows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr.bulk-selected'));
         const taskIds = bulkRows.map(extractTaskIdFromRow);
-        const tasks = await fetchTasks(taskIds);
-        const filteredTaskIds = tasks.filter((task) => !task.done).map((task) => task.id);
 
-        for (const taskId of filteredTaskIds) {
+        for (const taskId of taskIds) {
             updateSingleTask(taskId, { priority });
         }
 
         bulkRows.forEach((row) => {
-            const taskId = extractTaskIdFromRow(row);
-            if (!filteredTaskIds.includes(taskId)) {
-                return;
-            }
             const selectElement = row.querySelector<HTMLSelectElement>('.priority-select');
             if (selectElement) {
                 updatePrioritySelectAppearance(selectElement, priority);
