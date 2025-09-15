@@ -1,0 +1,11 @@
+{
+    "name": "Vikunja Enhanced Task Table",
+    "namespace": "https://github.com/Plong-Wasin",
+    "description": "Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.",
+    "version": "0.4.9",
+    "author": "Plong-Wasin",
+    "match": ["https://try.vikunja.io/*"],
+    "grant": ["GM_xmlhttpRequest", "GM_addStyle"],
+    "updateURL": "https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/refs/heads/main/vikunja-enhanced-task-table.user.js",
+    "downloadURL": "https://raw.githubusercontent.com/Plong-Wasin/vikunja-enhancements/refs/heads/main/vikunja-enhanced-task-table.user.js"
+}
