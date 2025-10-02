@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.4.10
+// @version      0.4.11
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -937,19 +937,27 @@
       }
     });
   }
+  function sortAssigneesAlphabetically(assignees) {
+    return assignees.slice().sort((a, b) => {
+      const nameA = (a.name || a.username).toLowerCase();
+      const nameB = (b.name || b.username).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }
   async function reorderAssigneesWithCurrentUserFirst(assignees) {
+    const sorted = sortAssigneesAlphabetically(assignees);
     const currentUser = await fetchCurrentUser();
     if (!currentUser) {
-      return assignees;
+      return sorted;
     }
-    const index = assignees.findIndex(
+    const index = sorted.findIndex(
       (a) => a.id === currentUser.id || a.username.toLowerCase() === currentUser.username.toLowerCase()
     );
     if (index > 0) {
-      const [current] = assignees.splice(index, 1);
-      assignees.unshift(current);
+      const [current] = sorted.splice(index, 1);
+      sorted.unshift(current);
     }
-    return assignees;
+    return sorted;
   }
   async function renderAssigneeSearchResults(container, assignees) {
     const sortedAssignees = await reorderAssigneesWithCurrentUserFirst([...assignees]);

@@ -286,26 +286,39 @@ function performAssigneeSearch(input: HTMLInputElement, menu: HTMLDivElement, pr
 }
 
 /**
- * Helper to reorder assignees to put current user first if present.
+ * Helper to sort assignees alphabetically by name or username.
+ */
+function sortAssigneesAlphabetically(assignees: Assignee[]): Assignee[] {
+    return assignees.slice().sort((a, b) => {
+        const nameA = (a.name || a.username).toLowerCase();
+        const nameB = (b.name || b.username).toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+}
+
+/**
+ * Helper to reorder assignees to put current user first if present,
+ * after sorting them alphabetically.
  */
 async function reorderAssigneesWithCurrentUserFirst(assignees: Assignee[]): Promise<Assignee[]> {
+    const sorted = sortAssigneesAlphabetically(assignees);
     const currentUser = await fetchCurrentUser();
     if (!currentUser) {
-        return assignees;
+        return sorted;
     }
     // Find index of current user by id or username
-    const index = assignees.findIndex(
+    const index = sorted.findIndex(
         (a) => a.id === currentUser.id || a.username.toLowerCase() === currentUser.username.toLowerCase()
     );
     if (index > 0) {
-        const [current] = assignees.splice(index, 1);
-        assignees.unshift(current);
+        const [current] = sorted.splice(index, 1);
+        sorted.unshift(current);
     }
-    return assignees;
+    return sorted;
 }
 
 async function renderAssigneeSearchResults(container: HTMLDivElement, assignees: Assignee[]): Promise<void> {
-    // Ensure current user is first in list if present
+    // Sort alphabetically, then put current user first if present
     const sortedAssignees = await reorderAssigneesWithCurrentUserFirst([...assignees]);
 
     await Promise.all(sortedAssignees.map((a) => fetchAvatarImage(a.username)));
