@@ -1,10 +1,13 @@
 import type { Assignee } from '../types/index.ts';
 import { getVisibleColumnPosition, extractTaskIdFromElement, getJwtToken } from '../utils/dom';
 import { COLUMN_ASSIGNEES } from '../constants/columns';
-import { fetchTaskById } from '../api/tasks';
+import { fetchTaskById, fetchCurrentUser } from '../api/tasks';
 import { assigneeSearchCache, avatarCache, taskCache } from '../utils/cache';
 import { debounce } from '../utils/debounce';
 
+/**
+ * Adds assignees selection feature initialization.
+ */
 export function addAssigneesSelectionFeature(): void {
     const visibleAssigneesPos = getVisibleColumnPosition(COLUMN_ASSIGNEES);
     if (visibleAssigneesPos === -1) {
@@ -277,16 +280,38 @@ function performAssigneeSearch(input: HTMLInputElement, menu: HTMLDivElement, pr
         onload: async (response) => {
             const assignees: Assignee[] = response.response ?? [];
             assigneeSearchCache.set(cacheKey, assignees);
-            renderAssigneeSearchResults(resultsContainer, assignees);
+            await renderAssigneeSearchResults(resultsContainer, assignees);
         }
     });
 }
 
+/**
+ * Helper to reorder assignees to put current user first if present.
+ */
+async function reorderAssigneesWithCurrentUserFirst(assignees: Assignee[]): Promise<Assignee[]> {
+    const currentUser = await fetchCurrentUser();
+    if (!currentUser) {
+        return assignees;
+    }
+    // Find index of current user by id or username
+    const index = assignees.findIndex(
+        (a) => a.id === currentUser.id || a.username.toLowerCase() === currentUser.username.toLowerCase()
+    );
+    if (index > 0) {
+        const [current] = assignees.splice(index, 1);
+        assignees.unshift(current);
+    }
+    return assignees;
+}
+
 async function renderAssigneeSearchResults(container: HTMLDivElement, assignees: Assignee[]): Promise<void> {
-    await Promise.all(assignees.map((a) => fetchAvatarImage(a.username)));
+    // Ensure current user is first in list if present
+    const sortedAssignees = await reorderAssigneesWithCurrentUserFirst([...assignees]);
+
+    await Promise.all(sortedAssignees.map((a) => fetchAvatarImage(a.username)));
 
     container.innerHTML = '';
-    for (const assignee of assignees) {
+    for (const assignee of sortedAssignees) {
         const avatar = await fetchAvatarImage(assignee.username);
         container.appendChild(createAssigneeSearchButton(assignee, avatar));
     }
