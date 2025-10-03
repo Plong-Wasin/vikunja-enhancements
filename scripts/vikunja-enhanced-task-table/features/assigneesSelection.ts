@@ -5,9 +5,6 @@ import { fetchTaskById, fetchCurrentUser } from '../api/tasks';
 import { assigneeSearchCache, avatarCache, taskCache } from '../utils/cache';
 import { debounce } from '../utils/debounce';
 
-/**
- * Adds assignees selection feature initialization.
- */
 export function addAssigneesSelectionFeature(): void {
     const visibleAssigneesPos = getVisibleColumnPosition(COLUMN_ASSIGNEES);
     if (visibleAssigneesPos === -1) {
@@ -17,7 +14,6 @@ export function addAssigneesSelectionFeature(): void {
     const cells = document.querySelectorAll<HTMLTableCellElement>(
         `table td:nth-child(${visibleAssigneesPos + 1}):not(.enhanced)`
     );
-
     cells.forEach((cell) => {
         cell.style.cursor = 'pointer';
         cell.classList.add('bulk-edit', 'enhanced');
@@ -31,7 +27,6 @@ function attachAssigneeMenuTrigger(cell: HTMLTableCellElement): void {
         if (target?.closest('#assigneesMenu') || !document.contains(target)) {
             return;
         }
-
         closeAssigneesMenu();
         openAssigneesMenuAtCell(cell);
     });
@@ -115,7 +110,7 @@ async function openAssigneesMenu(cell: HTMLTableCellElement, menu: HTMLDivElemen
     }
 
     await refreshSelectedAssigneesList(cell, selectedList);
-    setupAssigneeSearchInput(inputField, menu);
+    setupAssigneeSearchInput(inputField, menu, cell);
     setupAssigneesMenuOutsideClickListener(cell, menu);
 }
 
@@ -245,19 +240,122 @@ export function fetchAvatarImage(username: string): Promise<string> {
     });
 }
 
-async function setupAssigneeSearchInput(input: HTMLInputElement | null, menu: HTMLDivElement): Promise<void> {
+// --- NEW LOGIC: Keyboard Navigation for Search Results ------------
+
+type NavigationState = {
+    activeIndex: number;
+};
+
+function setupAssigneeSearchInput(
+    input: HTMLInputElement | null,
+    menu: HTMLDivElement,
+    cell: HTMLTableCellElement
+): void {
     if (!input) {
         return;
     }
 
     input.focus();
 
-    const currentTask = await fetchTaskById(extractTaskIdFromElement(input));
-    const debounceHandler = debounce(() => performAssigneeSearch(input, menu, currentTask.project_id), 300);
-    input.addEventListener('input', debounceHandler);
+    // Navigation state per menu
+    const navState: NavigationState = { activeIndex: -1 };
 
-    performAssigneeSearch(input, menu, currentTask.project_id);
+    let projectId: number | null = null;
+    fetchTaskById(extractTaskIdFromElement(cell)).then((task) => {
+        projectId = task?.project_id ?? null;
+
+        const debouncedSearch = debounce(() => {
+            performAssigneeSearch(input, menu, projectId!);
+        }, 300);
+
+        input.addEventListener('input', () => {
+            debouncedSearch();
+            navState.activeIndex = -1;
+        });
+
+        // First search, so results exist for arrow navigation
+        performAssigneeSearch(input, menu, projectId!);
+    });
+
+    // Arrow Up/Down navigation, Enter to select, Escape to close
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+        const buttons = getVisibleSearchResultButtons(menu);
+
+        if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+            event.stopPropagation();
+            event.preventDefault();
+        }
+
+        if (event.key === 'ArrowDown') {
+            // Move selection down
+            if (buttons.length === 0) {
+                return;
+            }
+            navState.activeIndex = getNextIndex(navState.activeIndex, buttons.length, 1);
+            highlightResult(menu, navState.activeIndex);
+        } else if (event.key === 'ArrowUp') {
+            // Move selection up
+            if (buttons.length === 0) {
+                return;
+            }
+            navState.activeIndex = getNextIndex(navState.activeIndex, buttons.length, -1);
+            highlightResult(menu, navState.activeIndex);
+        } else if (event.key === 'Enter') {
+            if (navState.activeIndex >= 0 && navState.activeIndex < buttons.length) {
+                // Click highlighted result with Enter
+                buttons[navState.activeIndex].click();
+            }
+        } else if (event.key === 'Escape') {
+            closeAssigneesMenu();
+        }
+    });
 }
+
+// Helper: get all current visible assignee result buttons in order, skipping hidden ones
+function getVisibleSearchResultButtons(menu: HTMLDivElement): HTMLButtonElement[] {
+    // "search-results" contains the result buttons
+    const allButtons = Array.from(menu.querySelectorAll<HTMLButtonElement>('.search-results button'));
+    // Filter buttons that are visible (either inline style or computed style)
+    return allButtons.filter((btn) => {
+        // Use offsetParent !== null as a practical visibility test
+        // This excludes display:none and elements detached from layout
+        return btn.offsetParent !== null;
+    });
+}
+
+// Helper: calculate next index for wrap-around
+function getNextIndex(current: number, total: number, offset: number): number {
+    if (total === 0) {
+        return -1;
+    }
+    if (current === -1) {
+        return offset > 0 ? 0 : total - 1;
+    }
+    const next = current + offset;
+    if (next < 0) {
+        return total - 1;
+    }
+    if (next >= total) {
+        return 0;
+    }
+    return next;
+}
+
+// Visually highlight the active result
+function highlightResult(menu: HTMLDivElement, index: number) {
+    const buttons = getVisibleSearchResultButtons(menu);
+    buttons.forEach((btn, idx) => {
+        if (idx === index) {
+            btn.classList.add('active', 'highlighted');
+            btn.style.backgroundColor = 'var(--table-row-hover-background-color)';
+        } else {
+            btn.classList.remove('active', 'highlighted');
+            btn.style.backgroundColor = '';
+        }
+    });
+}
+
+// --- END NEW LOGIC ---
 
 function performAssigneeSearch(input: HTMLInputElement, menu: HTMLDivElement, projectId: number): void {
     const query = input.value.trim();
@@ -285,9 +383,6 @@ function performAssigneeSearch(input: HTMLInputElement, menu: HTMLDivElement, pr
     });
 }
 
-/**
- * Helper to sort assignees alphabetically by name or username.
- */
 function sortAssigneesAlphabetically(assignees: Assignee[]): Assignee[] {
     return assignees.slice().sort((a, b) => {
         const nameA = (a.name || a.username).toLowerCase();
@@ -296,17 +391,12 @@ function sortAssigneesAlphabetically(assignees: Assignee[]): Assignee[] {
     });
 }
 
-/**
- * Helper to reorder assignees to put current user first if present,
- * after sorting them alphabetically.
- */
 async function reorderAssigneesWithCurrentUserFirst(assignees: Assignee[]): Promise<Assignee[]> {
     const sorted = sortAssigneesAlphabetically(assignees);
     const currentUser = await fetchCurrentUser();
     if (!currentUser) {
         return sorted;
     }
-    // Find index of current user by id or username
     const index = sorted.findIndex(
         (a) => a.id === currentUser.id || a.username.toLowerCase() === currentUser.username.toLowerCase()
     );
@@ -318,16 +408,20 @@ async function reorderAssigneesWithCurrentUserFirst(assignees: Assignee[]): Prom
 }
 
 async function renderAssigneeSearchResults(container: HTMLDivElement, assignees: Assignee[]): Promise<void> {
-    // Sort alphabetically, then put current user first if present
+    // Sort alphabetically and place current user if present
     const sortedAssignees = await reorderAssigneesWithCurrentUserFirst([...assignees]);
-
     await Promise.all(sortedAssignees.map((a) => fetchAvatarImage(a.username)));
-
     container.innerHTML = '';
-    for (const assignee of sortedAssignees) {
-        const avatar = await fetchAvatarImage(assignee.username);
-        container.appendChild(createAssigneeSearchButton(assignee, avatar));
-    }
+
+    await Promise.all(
+        sortedAssignees.map(async (assignee, idx) => {
+            const avatar = await fetchAvatarImage(assignee.username);
+            const btn = createAssigneeSearchButton(assignee, avatar);
+            btn.dataset.resultIndex = idx.toString();
+            btn.classList.remove('active', 'highlighted');
+            container.appendChild(btn);
+        })
+    );
     refreshAssigneesUI();
 }
 

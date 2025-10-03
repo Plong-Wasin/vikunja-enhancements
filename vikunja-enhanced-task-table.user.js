@@ -788,7 +788,7 @@
       return;
     }
     await refreshSelectedAssigneesList(cell, selectedList);
-    setupAssigneeSearchInput(inputField, menu);
+    setupAssigneeSearchInput(inputField, menu, cell);
     setupAssigneesMenuOutsideClickListener(cell, menu);
   }
   async function refreshSelectedAssigneesList(cell, selectedList) {
@@ -904,15 +904,84 @@
       });
     });
   }
-  async function setupAssigneeSearchInput(input, menu) {
+  function setupAssigneeSearchInput(input, menu, cell) {
     if (!input) {
       return;
     }
     input.focus();
-    const currentTask = await fetchTaskById(extractTaskIdFromElement(input));
-    const debounceHandler = debounce(() => performAssigneeSearch(input, menu, currentTask.project_id), 300);
-    input.addEventListener("input", debounceHandler);
-    performAssigneeSearch(input, menu, currentTask.project_id);
+    const navState = { activeIndex: -1 };
+    let projectId = null;
+    fetchTaskById(extractTaskIdFromElement(cell)).then((task) => {
+      projectId = task?.project_id ?? null;
+      const debouncedSearch = debounce(() => {
+        performAssigneeSearch(input, menu, projectId);
+      }, 300);
+      input.addEventListener("input", () => {
+        debouncedSearch();
+        navState.activeIndex = -1;
+      });
+      performAssigneeSearch(input, menu, projectId);
+    });
+    input.addEventListener("keydown", (event) => {
+      const buttons = getVisibleSearchResultButtons(menu);
+      if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      if (event.key === "ArrowDown") {
+        if (buttons.length === 0) {
+          return;
+        }
+        navState.activeIndex = getNextIndex(navState.activeIndex, buttons.length, 1);
+        highlightResult(menu, navState.activeIndex);
+      } else if (event.key === "ArrowUp") {
+        if (buttons.length === 0) {
+          return;
+        }
+        navState.activeIndex = getNextIndex(navState.activeIndex, buttons.length, -1);
+        highlightResult(menu, navState.activeIndex);
+      } else if (event.key === "Enter") {
+        if (navState.activeIndex >= 0 && navState.activeIndex < buttons.length) {
+          buttons[navState.activeIndex].click();
+        }
+      } else if (event.key === "Escape") {
+        closeAssigneesMenu();
+      }
+    });
+  }
+  function getVisibleSearchResultButtons(menu) {
+    const allButtons = Array.from(menu.querySelectorAll(".search-results button"));
+    return allButtons.filter((btn) => {
+      return btn.offsetParent !== null;
+    });
+  }
+  function getNextIndex(current, total, offset) {
+    if (total === 0) {
+      return -1;
+    }
+    if (current === -1) {
+      return offset > 0 ? 0 : total - 1;
+    }
+    const next = current + offset;
+    if (next < 0) {
+      return total - 1;
+    }
+    if (next >= total) {
+      return 0;
+    }
+    return next;
+  }
+  function highlightResult(menu, index) {
+    const buttons = getVisibleSearchResultButtons(menu);
+    buttons.forEach((btn, idx) => {
+      if (idx === index) {
+        btn.classList.add("active", "highlighted");
+        btn.style.backgroundColor = "var(--table-row-hover-background-color)";
+      } else {
+        btn.classList.remove("active", "highlighted");
+        btn.style.backgroundColor = "";
+      }
+    });
   }
   function performAssigneeSearch(input, menu, projectId) {
     const query = input.value.trim();
@@ -963,10 +1032,15 @@
     const sortedAssignees = await reorderAssigneesWithCurrentUserFirst([...assignees]);
     await Promise.all(sortedAssignees.map((a) => fetchAvatarImage(a.username)));
     container.innerHTML = "";
-    for (const assignee of sortedAssignees) {
-      const avatar = await fetchAvatarImage(assignee.username);
-      container.appendChild(createAssigneeSearchButton(assignee, avatar));
-    }
+    await Promise.all(
+      sortedAssignees.map(async (assignee, idx) => {
+        const avatar = await fetchAvatarImage(assignee.username);
+        const btn = createAssigneeSearchButton(assignee, avatar);
+        btn.dataset.resultIndex = idx.toString();
+        btn.classList.remove("active", "highlighted");
+        container.appendChild(btn);
+      })
+    );
     refreshAssigneesUI();
   }
   function createAssigneeSearchButton(assignee, avatar) {
@@ -1223,7 +1297,7 @@
       return;
     }
     await refreshSelectedLabelsList(cell, selectedList);
-    setupLabelsSearchInput(inputField, menu);
+    setupLabelsSearchInputWithKeyboardNavigation(inputField, menu);
     setupLabelsMenuOutsideClickListener(cell, menu);
   }
   function setupLabelsMenuOutsideClickListener(cell, menu) {
@@ -1235,6 +1309,81 @@
       }
     };
     document.addEventListener("click", outsideClickHandler);
+  }
+  function setupLabelsSearchInputWithKeyboardNavigation(input, menu) {
+    if (!input) {
+      return;
+    }
+    input.focus();
+    let activeIndex = -1;
+    const debouncedSearch = debounce(() => {
+      handleLabelSearch(input, menu).then(() => {
+        activeIndex = -1;
+      });
+    }, 300);
+    input.addEventListener("input", () => {
+      debouncedSearch();
+      activeIndex = -1;
+    });
+    handleLabelSearch(input, menu);
+    input.addEventListener("keydown", (event) => {
+      const buttons = getVisibleSearchResultButtons2(menu);
+      if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      if (event.key === "ArrowDown") {
+        if (buttons.length === 0) {
+          return;
+        }
+        activeIndex = getNextIndex2(activeIndex, buttons.length, 1);
+        highlightResult2(menu, activeIndex);
+      } else if (event.key === "ArrowUp") {
+        if (buttons.length === 0) {
+          return;
+        }
+        activeIndex = getNextIndex2(activeIndex, buttons.length, -1);
+        highlightResult2(menu, activeIndex);
+      } else if (event.key === "Enter") {
+        if (activeIndex >= 0 && activeIndex < buttons.length) {
+          buttons[activeIndex].click();
+        }
+      } else if (event.key === "Escape") {
+        closeLabelsMenu();
+      }
+    });
+  }
+  function getVisibleSearchResultButtons2(menu) {
+    const allButtons = Array.from(menu.querySelectorAll(".search-results button"));
+    return allButtons.filter((btn) => btn.offsetParent !== null);
+  }
+  function getNextIndex2(current, total, offset) {
+    if (total === 0) {
+      return -1;
+    }
+    if (current === -1) {
+      return offset > 0 ? 0 : total - 1;
+    }
+    const next = current + offset;
+    if (next < 0) {
+      return total - 1;
+    }
+    if (next >= total) {
+      return 0;
+    }
+    return next;
+  }
+  function highlightResult2(menu, index) {
+    const buttons = getVisibleSearchResultButtons2(menu);
+    buttons.forEach((btn, idx) => {
+      if (idx === index) {
+        btn.classList.add("active", "highlighted");
+        btn.style.backgroundColor = "var(--table-row-hover-background-color)";
+      } else {
+        btn.classList.remove("active", "highlighted");
+        btn.style.backgroundColor = "";
+      }
+    });
   }
   async function refreshLabelsColumnUI() {
     const visibleLabelPos = getVisibleColumnPosition(COLUMN_LABELS);
@@ -1265,15 +1414,6 @@
       }
       cell.appendChild(wrapper);
     }
-  }
-  async function setupLabelsSearchInput(input, menu) {
-    if (!input) {
-      return;
-    }
-    input.focus();
-    const debouncedSearch = debounce(() => handleLabelSearch(input, menu), 300);
-    input.addEventListener("input", debouncedSearch);
-    handleLabelSearch(input, menu);
   }
   async function handleLabelSearch(input, menu) {
     const query = input.value.trim();

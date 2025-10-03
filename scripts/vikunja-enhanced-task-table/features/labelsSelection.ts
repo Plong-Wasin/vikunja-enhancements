@@ -121,7 +121,7 @@ async function openLabelsMenu(cell: HTMLTableCellElement, menu: HTMLDivElement):
     }
 
     await refreshSelectedLabelsList(cell, selectedList);
-    setupLabelsSearchInput(inputField, menu);
+    setupLabelsSearchInputWithKeyboardNavigation(inputField, menu);
     setupLabelsMenuOutsideClickListener(cell, menu);
 }
 
@@ -134,6 +134,110 @@ function setupLabelsMenuOutsideClickListener(cell: HTMLTableCellElement, menu: H
         }
     };
     document.addEventListener('click', outsideClickHandler);
+}
+
+/**
+ * Setup label search input with keyboard navigation support similar to assignees.
+ */
+function setupLabelsSearchInputWithKeyboardNavigation(input: HTMLInputElement | null, menu: HTMLDivElement): void {
+    if (!input) {
+        return;
+    }
+
+    input.focus();
+
+    // Navigation state for active highlighted result
+    let activeIndex = -1;
+
+    const debouncedSearch = debounce(() => {
+        handleLabelSearch(input, menu).then(() => {
+            activeIndex = -1; // reset highlight after search results update
+        });
+    }, 300);
+
+    input.addEventListener('input', () => {
+        debouncedSearch();
+        activeIndex = -1;
+    });
+
+    // Initial search
+    handleLabelSearch(input, menu);
+
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+        const buttons = getVisibleSearchResultButtons(menu);
+
+        if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) {
+            event.stopPropagation();
+            event.preventDefault();
+        }
+
+        if (event.key === 'ArrowDown') {
+            if (buttons.length === 0) {
+                return;
+            }
+            activeIndex = getNextIndex(activeIndex, buttons.length, 1);
+            highlightResult(menu, activeIndex);
+        } else if (event.key === 'ArrowUp') {
+            if (buttons.length === 0) {
+                return;
+            }
+            activeIndex = getNextIndex(activeIndex, buttons.length, -1);
+            highlightResult(menu, activeIndex);
+        } else if (event.key === 'Enter') {
+            if (activeIndex >= 0 && activeIndex < buttons.length) {
+                // Click the highlighted label button
+                buttons[activeIndex].click();
+            }
+        } else if (event.key === 'Escape') {
+            closeLabelsMenu();
+        }
+    });
+}
+
+/**
+ * Helper: get visible search result buttons (excluding hidden ones).
+ */
+function getVisibleSearchResultButtons(menu: HTMLDivElement): HTMLButtonElement[] {
+    // Search results container holds buttons
+    const allButtons = Array.from(menu.querySelectorAll<HTMLButtonElement>('.search-results button'));
+    // Only visible buttons (offsetParent != null means visible)
+    return allButtons.filter((btn) => btn.offsetParent !== null);
+}
+
+/**
+ * Helper: calculate next index for circular navigation.
+ */
+function getNextIndex(current: number, total: number, offset: number): number {
+    if (total === 0) {
+        return -1;
+    }
+    if (current === -1) {
+        return offset > 0 ? 0 : total - 1;
+    }
+    const next = current + offset;
+    if (next < 0) {
+        return total - 1;
+    }
+    if (next >= total) {
+        return 0;
+    }
+    return next;
+}
+
+/**
+ * Highlight the currently active search result button visually.
+ */
+function highlightResult(menu: HTMLDivElement, index: number) {
+    const buttons = getVisibleSearchResultButtons(menu);
+    buttons.forEach((btn, idx) => {
+        if (idx === index) {
+            btn.classList.add('active', 'highlighted');
+            btn.style.backgroundColor = 'var(--table-row-hover-background-color)';
+        } else {
+            btn.classList.remove('active', 'highlighted');
+            btn.style.backgroundColor = '';
+        }
+    });
 }
 
 export async function refreshLabelsColumnUI(): Promise<void> {
@@ -172,18 +276,6 @@ export async function refreshLabelsColumnUI(): Promise<void> {
         }
         cell.appendChild(wrapper);
     }
-}
-
-async function setupLabelsSearchInput(input: HTMLInputElement | null, menu: HTMLDivElement): Promise<void> {
-    if (!input) {
-        return;
-    }
-
-    input.focus();
-
-    const debouncedSearch = debounce(() => handleLabelSearch(input, menu), 300);
-    input.addEventListener('input', debouncedSearch);
-    handleLabelSearch(input, menu);
 }
 
 async function handleLabelSearch(input: HTMLInputElement, menu: HTMLDivElement): Promise<void> {
