@@ -54,6 +54,60 @@ GM_addStyle(`
                 gap: 6px;
             }
         }
+        
+        /* Checkbox Progress Indicator Styles - positioned after description icon */
+        .checkbox-progress-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 10px;
+            color: var(--text-light);
+            margin-left: 2px;
+            flex-shrink: 0;
+        }
+        
+        .progress-circle-wrapper {
+            width: 14px;
+            height: 14px;
+            position: relative;
+            display: inline-block;
+        }
+        
+        .progress-svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(0deg);
+        }
+        
+        .progress-bg {
+            fill: none;
+            stroke: var(--grey-200);
+            stroke-width: 3;
+        }
+        
+        .progress-fill {
+            fill: none;
+            stroke: var(--primary);
+            stroke-width: 3;
+            stroke-linecap: round;
+            transition: stroke-dasharray 0.3s ease;
+        }
+        
+        .progress-text {
+            font-weight: 600;
+            font-size: 9px;
+            white-space: nowrap;
+            line-height: 1;
+        }
+        
+        /* Hover effect for the entire progress indicator */
+        .checkbox-progress-indicator:hover {
+            color: var(--grey-700);
+        }
+        
+        .checkbox-progress-indicator:hover .progress-fill {
+            stroke: var(--primary-hover);
+        }
     }
 `);
 

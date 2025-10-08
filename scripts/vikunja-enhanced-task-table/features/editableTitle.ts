@@ -1,6 +1,7 @@
 import { getVisibleColumnPosition, extractTaskIdFromElement, focusContentEditableAtEnd } from '../utils/dom';
 import { COLUMN_TITLE } from '../constants/columns';
 import { fetchTaskById, updateSingleTask } from '../api/tasks';
+import { hasCheckboxes, getChecklistStatistics } from '../utils/checklistStats';
 
 /**
  * Entry: enhance all title cells for inline edit capability.
@@ -55,10 +56,17 @@ export async function setupEditableTitleCell(cell: HTMLTableCellElement): Promis
         const attachmentIcon = createAttachmentIcon();
         titleWrapper.appendChild(attachmentIcon);
     }
-    // Description icon if description exists
+
+    // Description icon (always show if description exists)
     if (taskHasDescription(task)) {
         const descriptionIcon = createDescriptionIcon();
         titleWrapper.appendChild(descriptionIcon);
+
+        // Add progress indicator after description icon if checkboxes are present
+        if (task.description && hasCheckboxes(task.description)) {
+            const progressIndicator = createCheckboxProgressIndicator(task.description);
+            titleWrapper.appendChild(progressIndicator);
+        }
     }
 
     container.appendChild(titleWrapper);
@@ -93,6 +101,9 @@ function taskHasDescription(task: { description?: string }): boolean {
     return task.description !== '<p></p>';
 }
 
+/**
+ * Creates a simple description icon.
+ */
 function createDescriptionIcon(): HTMLSpanElement {
     const descriptionIcon = document.createElement('span');
     descriptionIcon.className = 'project-task-icon is-mirrored-rtl';
@@ -101,6 +112,50 @@ function createDescriptionIcon(): HTMLSpanElement {
             <path fill="currentColor" d="M288 64c0 17.7-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l224 0c17.7 0 32 14.3 32 32zm0 256c0 17.7-14.3 32-32 32L32 352c-17.7 0-32-14.3-32-32s14.3-32 32-32l224 0c17.7 0 32 14.3 32 32zM0 192c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 224c-17.7 0-32-14.3-32-32zM448 448c0 17.7-14.3 32-32 32L32 480c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"/>
         </svg>`;
     return descriptionIcon;
+}
+
+/**
+ * Creates a circular checkbox progress indicator that appears after the description icon.
+ */
+function createCheckboxProgressIndicator(description: string): HTMLSpanElement {
+    const stats = getChecklistStatistics(description);
+    const progress = Math.round((stats.checked / stats.total) * 100);
+
+    // Create progress container
+    const progressContainer = document.createElement('span');
+    progressContainer.className = 'checkbox-progress-indicator';
+    progressContainer.title = `${stats.checked} of ${stats.total} tasks completed`;
+
+    // Circular progress indicator
+    const progressCircle = document.createElement('span');
+    progressCircle.className = 'progress-circle-wrapper';
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    circle.classList.add('progress-svg');
+    circle.setAttribute('viewBox', '0 0 36 36');
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.classList.add('progress-bg');
+    path.setAttribute('d', 'M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831');
+
+    const fill = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    fill.classList.add('progress-fill');
+    fill.setAttribute('d', 'M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831');
+    fill.setAttribute('stroke-dasharray', `${progress}, 100`);
+
+    circle.appendChild(path);
+    circle.appendChild(fill);
+    progressCircle.appendChild(circle);
+
+    // Progress text
+    const progressText = document.createElement('span');
+    progressText.className = 'progress-text';
+    progressText.textContent = `${stats.checked}/${stats.total}`;
+
+    progressContainer.appendChild(progressCircle);
+    progressContainer.appendChild(progressText);
+
+    return progressContainer;
 }
 
 function applyFlexContainerStyle(element: HTMLElement): void {

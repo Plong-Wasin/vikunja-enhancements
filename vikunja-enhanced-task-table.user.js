@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vikunja Enhanced Task Table
 // @namespace    https://github.com/Plong-Wasin
-// @version      0.5.0
+// @version      0.6.0
 // @description  Adds inline editing, bulk actions, drag & drop, and other UI enhancements to Vikunja task tables.
 // @author       Plong-Wasin
 // @match        https://try.vikunja.io/*
@@ -68,6 +68,60 @@
                 flex-wrap: wrap;
                 gap: 6px;
             }
+        }
+        
+        /* Checkbox Progress Indicator Styles - positioned after description icon */
+        .checkbox-progress-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 10px;
+            color: var(--text-light);
+            margin-left: 2px;
+            flex-shrink: 0;
+        }
+        
+        .progress-circle-wrapper {
+            width: 14px;
+            height: 14px;
+            position: relative;
+            display: inline-block;
+        }
+        
+        .progress-svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(0deg);
+        }
+        
+        .progress-bg {
+            fill: none;
+            stroke: var(--grey-200);
+            stroke-width: 3;
+        }
+        
+        .progress-fill {
+            fill: none;
+            stroke: var(--primary);
+            stroke-width: 3;
+            stroke-linecap: round;
+            transition: stroke-dasharray 0.3s ease;
+        }
+        
+        .progress-text {
+            font-weight: 600;
+            font-size: 9px;
+            white-space: nowrap;
+            line-height: 1;
+        }
+        
+        /* Hover effect for the entire progress indicator */
+        .checkbox-progress-indicator:hover {
+            color: var(--grey-700);
+        }
+        
+        .checkbox-progress-indicator:hover .progress-fill {
+            stroke: var(--primary-hover);
         }
     }
 `);
@@ -256,6 +310,41 @@
   var COLOR_LIGHT = "hsl(220, 13%, 91%)";
   var COLOR_DARK = "hsl(215, 27.9%, 16.9%)";
 
+  // scripts/vikunja-enhanced-task-table/utils/checklistStats.ts
+  var getCheckboxesInText = (text) => {
+    const regex = /data-checked="(true|false)"/g;
+    let match;
+    const checkboxes = {
+      checked: [],
+      unchecked: []
+    };
+    while ((match = regex.exec(text)) !== null) {
+      if (match[1] === "true") {
+        checkboxes.checked.push(match.index);
+      } else {
+        checkboxes.unchecked.push(match.index);
+      }
+    }
+    return checkboxes;
+  };
+  var getChecklistStatistics = (text) => {
+    const checkboxes = getCheckboxesInText(text);
+    return {
+      total: checkboxes.checked.length + checkboxes.unchecked.length,
+      checked: checkboxes.checked.length
+    };
+  };
+  var hasCheckboxes = (text) => {
+    return getCheckboxProgress(text) > 0;
+  };
+  var getCheckboxProgress = (text) => {
+    const stats = getChecklistStatistics(text);
+    if (stats.total === 0) {
+      return 0;
+    }
+    return Math.round(stats.checked / stats.total * 100);
+  };
+
   // scripts/vikunja-enhanced-task-table/features/editableTitle.ts
   function addEditableTitleFeature() {
     const visibleTitlePos = getVisibleColumnPosition(COLUMN_TITLE);
@@ -293,6 +382,10 @@
     if (taskHasDescription(task)) {
       const descriptionIcon = createDescriptionIcon();
       titleWrapper.appendChild(descriptionIcon);
+      if (task.description && hasCheckboxes(task.description)) {
+        const progressIndicator = createCheckboxProgressIndicator(task.description);
+        titleWrapper.appendChild(progressIndicator);
+      }
     }
     container.appendChild(titleWrapper);
     const editableContentSpan = createContentEditableSpan();
@@ -325,6 +418,34 @@
             <path fill="currentColor" d="M288 64c0 17.7-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l224 0c17.7 0 32 14.3 32 32zm0 256c0 17.7-14.3 32-32 32L32 352c-17.7 0-32-14.3-32-32s14.3-32 32-32l224 0c17.7 0 32 14.3 32 32zM0 192c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 224c-17.7 0-32-14.3-32-32zM448 448c0 17.7-14.3 32-32 32L32 480c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"/>
         </svg>`;
     return descriptionIcon;
+  }
+  function createCheckboxProgressIndicator(description) {
+    const stats = getChecklistStatistics(description);
+    const progress = Math.round(stats.checked / stats.total * 100);
+    const progressContainer = document.createElement("span");
+    progressContainer.className = "checkbox-progress-indicator";
+    progressContainer.title = `${stats.checked} of ${stats.total} tasks completed`;
+    const progressCircle = document.createElement("span");
+    progressCircle.className = "progress-circle-wrapper";
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    circle.classList.add("progress-svg");
+    circle.setAttribute("viewBox", "0 0 36 36");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.classList.add("progress-bg");
+    path.setAttribute("d", "M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831");
+    const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    fill.classList.add("progress-fill");
+    fill.setAttribute("d", "M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831");
+    fill.setAttribute("stroke-dasharray", `${progress}, 100`);
+    circle.appendChild(path);
+    circle.appendChild(fill);
+    progressCircle.appendChild(circle);
+    const progressText = document.createElement("span");
+    progressText.className = "progress-text";
+    progressText.textContent = `${stats.checked}/${stats.total}`;
+    progressContainer.appendChild(progressCircle);
+    progressContainer.appendChild(progressText);
+    return progressContainer;
   }
   function applyFlexContainerStyle(element) {
     element.style.display = "flex";
