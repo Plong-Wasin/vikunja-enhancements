@@ -14,13 +14,14 @@ Enhance the task management experience in Vikunja with this userscript. This scr
 - **Add Tasks:** Inline task addition with a simple form.
 - **Dynamic UI Updates:** Automatic DOM monitoring to reapply enhancements as tasks change.
 - **Visual Enhancements:** Clear feedback on selections, drag targets, and edited items.
+- **Checklist Progress:** Visual progress indicators for tasks with checklists in descriptions.
 
 ---
 
 ## Installation
 
 1. Install a userscript manager like [Tampermonkey](https://www.tampermonkey.net/) (available for Chrome, Firefox, Edge, Opera).
-2. Click the “Raw” or “Download” link to access the userscript file ([`vikunja-enhanced-task-table.user.js`](vikunja-enhanced-task-table.user.js)).
+2. Click the "Raw" or "Download" link to access the userscript file ([`vikunja-enhanced-task-table.user.js`](vikunja-enhanced-task-table.user.js)).
 3. Open the userscript file in Tampermonkey or your userscript manager.
 4. Enable the script.
 5. Navigate to your Vikunja projects page (`https://your-vikunja-instance.com/projects/*`).
@@ -32,13 +33,13 @@ Enhance the task management experience in Vikunja with this userscript. This scr
 
 - **Selecting Tasks:** Click on rows to select; use Shift+Click for ranges or Ctrl/Cmd+Click for multi-select.
 - **Editing Titles:** Double-click or press the pencil icon next to a task title to edit inline.
-- **Marking Done:** Use checkboxes in the “Done” column to toggle task completion, supports bulk updates.
+- **Marking Done:** Use checkboxes in the "Done" column to toggle task completion, supports bulk updates.
 - **Changing Priority:** Select priority from dropdown menus, supports bulk updates.
 - **Editing Dates:** Change Due, Start, or End dates with convenient date pickers.
 - **Adjust Progress:** Double-click progress cells and enter values (0–100%) for quick updates.
 - **Manage Assignees and Labels:** Click cells to open searchable selection menus with avatars and quick add/remove.
 - **Drag & Drop:** Drag selected rows to reorder or set parent tasks in the hierarchy; drag onto projects menu to move tasks between projects.
-- **Add New Task:** Use the “Add a task…” input field above the table to quickly create new tasks.
+- **Add New Task:** Use the "Add a task…" input field above the table to quickly create new tasks.
 
 ---
 
@@ -56,12 +57,52 @@ To specify which URLs the userscript runs on, update the matching patterns as fo
 
 ## Development
 
-The script is written in TypeScript (compiled to JavaScript) and uses:
+This project is written in TypeScript and uses a modern build system:
 
-- Tampermonkey GM_xmlhttpRequest for cross-origin API communication.
-- DOM manipulation and events for UI enhancements.
-- MutationObservers to track dynamic changes and keep UI in sync.
-- Caching of tasks, avatars, assignees, and labels to avoid unnecessary API calls.
+### Project Structure
+- `scripts/vikunja-enhanced-task-table/` - Main source code directory
+  - `main.ts` - Entry point and initialization
+  - `features/` - Individual feature implementations
+  - `api/` - API communication layer
+  - `utils/` - Utility functions
+  - `types/` - TypeScript type definitions
+  - `styles/` - CSS styles
+  - `meta.json` - Userscript metadata
+
+### Build System
+- **TypeScript** for type-safe development
+- **esbuild** for fast compilation and bundling
+- **Bun** as the package manager and build runner
+
+### Building the Script
+```bash
+# Install dependencies
+bun install
+
+# Build the userscript
+bun run build
+
+# Build with watch mode for development
+bun run build:watch
+```
+
+### Technologies Used
+- Tampermonkey GM_xmlhttpRequest for cross-origin API communication
+- DOM manipulation and events for UI enhancements
+- MutationObservers to track dynamic changes and keep UI in sync
+- Caching of tasks, avatars, assignees, and labels to avoid unnecessary API calls
+- TypeScript for type safety and better development experience
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Build the script using `bun run build`
+5. Test the compiled userscript
+6. Submit a pull request
 
 ---
 
